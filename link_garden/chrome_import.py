@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -39,6 +40,12 @@ class ImportStats:
     created: int = 0
     updated: int = 0
     skipped: int = 0
+
+
+@dataclass(frozen=True)
+class FileSnapshot:
+    mtime_ns: int
+    size_bytes: int
 
 
 def parse_chrome_bookmarks(bookmarks_file: Path) -> list[ChromeBookmarkRecord]:
@@ -188,3 +195,61 @@ def import_chrome_bookmarks(
         stats.skipped,
     )
     return stats
+
+
+def get_file_snapshot(path: Path) -> FileSnapshot | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return FileSnapshot(mtime_ns=stat.st_mtime_ns, size_bytes=stat.st_size)
+
+
+def file_has_changed(previous: FileSnapshot | None, current: FileSnapshot | None) -> bool:
+    if previous is None and current is None:
+        return False
+    if previous is None or current is None:
+        return True
+    return previous != current
+
+
+def watch_import_loop(
+    paths: StoragePaths,
+    bookmarks_file: Path,
+    dedupe: DedupeMode,
+    interval_seconds: int,
+    dry_run: bool,
+    profile_name: str,
+) -> None:
+    last_snapshot: FileSnapshot | None = None
+    logger.info(
+        "watch_start file=%s interval=%ss dedupe=%s dry_run=%s",
+        bookmarks_file,
+        interval_seconds,
+        dedupe.value,
+        dry_run,
+    )
+    while True:
+        snapshot = get_file_snapshot(bookmarks_file)
+        if file_has_changed(last_snapshot, snapshot):
+            if snapshot is None:
+                logger.warning("watch_cycle status=missing_file file=%s", bookmarks_file)
+            else:
+                stats = import_chrome_bookmarks(
+                    paths=paths,
+                    bookmarks_file=bookmarks_file,
+                    dedupe=dedupe,
+                    dry_run=dry_run,
+                    profile_name=profile_name,
+                )
+                logger.info(
+                    "watch_cycle status=imported total=%d created=%d updated=%d skipped=%d",
+                    stats.total,
+                    stats.created,
+                    stats.updated,
+                    stats.skipped,
+                )
+            last_snapshot = snapshot
+        else:
+            logger.info("watch_cycle status=no_change")
+        time.sleep(interval_seconds)

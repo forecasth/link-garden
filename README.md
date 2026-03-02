@@ -99,10 +99,82 @@ Run integrity checks:
 link-garden doctor
 ```
 
-## Minimal UI plan (placeholder)
+## Minimal UI status
 
-MVP is CLI-first. A future local UI can be added with FastAPI + Jinja templates:
+MVP remains CLI-first, and now includes a small local read-only web UI (FastAPI + Jinja) with list/search/filter/detail pages.
 
-- Read-only list + search
-- Bookmark detail view (render Markdown)
-- Local form for adding bookmarks
+## Additional commands
+
+```bash
+# Explicit index rebuild (recommended over doctor --rebuild-index)
+link-garden rebuild-index [--repo-dir .] [--data-dir ./data] [--dry-run]
+
+# Local web server
+link-garden serve [--host 127.0.0.1] [--port 8000] [--repo-dir .] [--data-dir ./data] [--open-browser/--no-open-browser]
+
+# Chrome import watch mode
+link-garden import-chrome --bookmarks-file "./Bookmarks" --watch --interval 60
+```
+
+`doctor --rebuild-index` is still supported for backward compatibility, but `rebuild-index` is the preferred explicit workflow.
+
+## Web UI
+
+Run locally:
+
+```bash
+link-garden serve --repo-dir . --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000`.
+
+Features:
+
+- Home page with search box, tag filter, folder filter, and pagination (`page`, `per_page` query params).
+- Bookmark detail page with frontmatter, rendered markdown body, and an `Open URL` link.
+- Capture endpoint for bookmarklet-style saving:
+  - `GET /capture?url=...&title=...&tags=t1,t2&notes=...&folder=...`
+
+Security note: default bind is localhost (`127.0.0.1`). Keep it local unless you intentionally expose it.
+
+## Theming
+
+Design tokens and component styles are defined in one file:
+
+- `ui/theme.yaml`
+
+On `link-garden serve`, the theme compiler reads `ui/theme.yaml` and generates:
+
+- `link_garden/web/static/theme.css`
+
+You can customize colors, typography, spacing, radius, shadows, and component style values in `ui/theme.yaml`. Restart `serve` to regenerate CSS.
+
+## Bookmarklet capture
+
+Create a browser bookmark with this URL as its target:
+
+```javascript
+javascript:(function(){var u=encodeURIComponent(location.href);var t=encodeURIComponent(document.title||'');window.open('http://127.0.0.1:8000/capture?url='+u+'&title='+t,'_blank');})();
+```
+
+This opens the local capture endpoint and redirects to the saved bookmark detail page.
+
+## Import watch workflow
+
+Non-daemon poll mode is available on Chrome import:
+
+```bash
+link-garden import-chrome --bookmarks-file "./Bookmarks" --dedupe both --watch --interval 60
+```
+
+It checks bookmark file metadata (`mtime` + size) and imports only when the file changes.
+
+## Roadmap
+
+- [x] Explicit `rebuild-index` command with dry-run summary reporting.
+- [x] Minimal local read-only web UI (`serve`) with search/filter/detail/pagination.
+- [x] Theme system from a single YAML file compiled to CSS.
+- [x] Bookmarklet-friendly capture endpoint (`/capture`).
+- [x] Chrome import watch mode (`import-chrome --watch`).
+- [ ] Optional write UI (form editing in browser).
+- [ ] Optional link health checker.

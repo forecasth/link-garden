@@ -1,0 +1,45 @@
+colors:
+  bg: "#f6f7f9"
+  surface: "#ffffff"
+  text: "#1f2430"
+  muted: "#636b78"
+  accent: "#0f5cc0"
+  border: "#d7dde6"
+
+typography:
+  family: "'IBM Plex Sans', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+  base_size: "16px"
+  scale_ratio: "1.2"
+
+spacing:
+  xs: "0.35rem"
+  sm: "0.65rem"
+  md: "1rem"
+  lg: "1.5rem"
+  xl: "2.25rem"
+
+radius:
+  sm: "6px"
+  md: "10px"
+  lg: "14px"
+
+shadows:
+  subtle: "0 1px 2px rgba(15, 23, 42, 0.06)"
+  medium: "0 8px 20px rgba(15, 23, 42, 0.1)"
+
+components:
+  card:
+    background: "{colors.surface}"
+    border: "1px solid {colors.border}"
+  btn:
+    border-radius: "{radius.sm}"
+  input:
+    border-radius: "{radius.sm}"
+  tag:
+    color: "{colors.text}"
+  badge:
+    color: "{colors.muted}"
+  toolbar:
+    background: "transparent"
+  layout:
+    background: "transparent"

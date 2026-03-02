@@ -21,16 +21,22 @@ class StoragePaths:
     index_file: Path
 
 
-def resolve_paths(root: Path | str | None = None) -> StoragePaths:
+def resolve_paths(root: Path | str | None = None, data_dir: Path | str | None = None) -> StoragePaths:
     root_path = Path(root or Path.cwd()).resolve()
-    data_dir = root_path / "data"
-    bookmarks_dir = data_dir / "bookmarks"
-    index_file = data_dir / "index.json"
-    return StoragePaths(root=root_path, data_dir=data_dir, bookmarks_dir=bookmarks_dir, index_file=index_file)
+    if data_dir is None:
+        resolved_data_dir = root_path / "data"
+    else:
+        candidate = Path(data_dir)
+        if not candidate.is_absolute():
+            candidate = root_path / candidate
+        resolved_data_dir = candidate.resolve()
+    bookmarks_dir = resolved_data_dir / "bookmarks"
+    index_file = resolved_data_dir / "index.json"
+    return StoragePaths(root=root_path, data_dir=resolved_data_dir, bookmarks_dir=bookmarks_dir, index_file=index_file)
 
 
-def init_storage(root: Path | str | None = None) -> StoragePaths:
-    paths = resolve_paths(root)
+def init_storage(root: Path | str | None = None, data_dir: Path | str | None = None) -> StoragePaths:
+    paths = resolve_paths(root, data_dir=data_dir)
     paths.bookmarks_dir.mkdir(parents=True, exist_ok=True)
     if not paths.index_file.exists():
         paths.index_file.write_text("[]\n", encoding="utf-8")
@@ -38,7 +44,11 @@ def init_storage(root: Path | str | None = None) -> StoragePaths:
 
 
 def relative_to_root(paths: StoragePaths, file_path: Path) -> str:
-    return file_path.resolve().relative_to(paths.root).as_posix()
+    resolved = file_path.resolve()
+    try:
+        return resolved.relative_to(paths.root).as_posix()
+    except ValueError:
+        return resolved.as_posix()
 
 
 def list_bookmark_files(paths: StoragePaths) -> list[Path]:

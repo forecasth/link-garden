@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Link Garden</h1>
+<p class="muted">Read-only local view over <code>data/index.json</code> and bookmark markdown files.</p>
+
+<form method="get" action="/" class="toolbar">
+  <input class="input" type="text" name="search" value="{{ search }}" placeholder="Search title, URL, tags, folder" />
+  <select class="input" name="tag">
+    <option value="">All tags</option>
+    {% for tag_item in all_tags %}
+    <option value="{{ tag_item }}" {% if tag_item == tag %}selected{% endif %}>{{ tag_item }}</option>
+    {% endfor %}
+  </select>
+  <select class="input" name="folder">
+    <option value="">All folders</option>
+    {% for folder_item in all_folders %}
+    <option value="{{ folder_item }}" {% if folder_item == folder %}selected{% endif %}>{{ folder_item }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">Apply</button>
+</form>
+
+<p class="muted">Showing {{ rows|length }} of {{ total }} bookmark(s), page {{ page }} / {{ total_pages }}</p>
+
+{% for row in rows %}
+<article class="card">
+  <div class="row">
+    <a href="/bookmark/{{ row.id }}"><strong>{{ row.title }}</strong></a>
+    <span class="badge">{{ row.domain }}</span>
+  </div>
+  <div class="meta">{{ row.saved_at }}{% if row.folder_path %} | {{ row.folder_path }}{% endif %}</div>
+  <div class="row" style="margin-top:0.45rem;">
+    <a href="{{ row.url }}" target="_blank" rel="noopener">Open URL</a>
+  </div>
+  {% if row.tags %}
+  <div style="margin-top:0.45rem;">
+    {% for tag_item in row.tags %}
+    <span class="tag">{{ tag_item }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</article>
+{% endfor %}
+
+{% if not rows %}
+<p>No bookmarks match the current filter.</p>
+{% endif %}
+
+<nav class="pagination">
+  {% if prev_url %}
+  <a class="btn" href="{{ prev_url }}">Previous</a>
+  {% endif %}
+  {% if next_url %}
+  <a class="btn" href="{{ next_url }}">Next</a>
+  {% endif %}
+</nav>
+{% endblock %}

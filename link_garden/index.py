@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from link_garden.model import Bookmark, IndexEntry
 from link_garden.storage import StoragePaths, ensure_index_file, list_bookmark_files, read_bookmark_file, relative_to_root
 from link_garden.utils import normalize_url
+
+
+@dataclass
+class RebuildError:
+    path: str
+    error: str
+
+
+@dataclass
+class RebuildReport:
+    scanned: int = 0
+    indexed: int = 0
+    skipped: int = 0
+    errors: list[RebuildError] = field(default_factory=list)
+    entries: list[IndexEntry] = field(default_factory=list)
 
 
 def load_index(paths: StoragePaths) -> list[IndexEntry]:
@@ -45,14 +61,28 @@ def upsert_entry(entries: list[IndexEntry], entry: IndexEntry) -> list[IndexEntr
     return updated
 
 
-def rebuild_index_from_files(paths: StoragePaths) -> list[IndexEntry]:
+def rebuild_index_with_report(paths: StoragePaths, dry_run: bool = False) -> RebuildReport:
+    report = RebuildReport()
     rebuilt: list[IndexEntry] = []
     for bookmark_file in list_bookmark_files(paths):
-        bookmark = read_bookmark_file(bookmark_file)
+        report.scanned += 1
+        try:
+            bookmark = read_bookmark_file(bookmark_file)
+        except Exception as exc:  # noqa: BLE001
+            report.skipped += 1
+            report.errors.append(RebuildError(path=relative_to_root(paths, bookmark_file), error=str(exc)))
+            continue
         rel_path = relative_to_root(paths, bookmark_file)
         rebuilt.append(entry_from_bookmark(bookmark, rel_path))
-    save_index(paths, rebuilt)
-    return rebuilt
+    report.entries = rebuilt
+    report.indexed = len(rebuilt)
+    if not dry_run:
+        save_index(paths, rebuilt)
+    return report
+
+
+def rebuild_index_from_files(paths: StoragePaths) -> list[IndexEntry]:
+    return rebuild_index_with_report(paths, dry_run=False).entries
 
 
 def build_lookup_maps(entries: list[IndexEntry]) -> tuple[dict[str, IndexEntry], dict[str, IndexEntry]]:

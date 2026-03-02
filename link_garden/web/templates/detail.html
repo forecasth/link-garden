@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/">Back to list</a></p>
+<h1>{{ bookmark.title }}</h1>
+<p class="meta">
+  saved_at={{ bookmark.saved_at }} |
+  source={{ bookmark.source }} |
+  file={{ source_path }}
+</p>
+<p><a class="btn" href="{{ bookmark.url }}" target="_blank" rel="noopener">Open URL</a></p>
+
+{% if bookmark.tags %}
+<div style="margin-bottom:0.8rem;">
+  {% for tag_item in bookmark.tags %}
+  <span class="tag">{{ tag_item }}</span>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card">
+  <h2>Notes</h2>
+  {% if body_html %}
+  <div>{{ body_html|safe }}</div>
+  {% else %}
+  <p class="muted">No markdown body.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Frontmatter</h2>
+  <pre><code>{{ frontmatter_text }}</code></pre>
+</section>
+{% endblock %}

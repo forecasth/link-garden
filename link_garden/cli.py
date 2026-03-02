@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import logging
+import threading
+import webbrowser
 from pathlib import Path
 
 import typer
 
-from link_garden.chrome_import import DedupeMode, import_chrome_bookmarks
+from link_garden.chrome_import import DedupeMode, import_chrome_bookmarks, watch_import_loop
 from link_garden.export import ExportFormat, export_bookmarks
 from link_garden.index import (
     build_lookup_maps,
     entry_from_bookmark,
     index_paths,
     load_index,
-    rebuild_index_from_files,
+    rebuild_index_with_report,
     save_index,
     upsert_entry,
 )
@@ -27,6 +29,10 @@ app = typer.Typer(help="Local-first bookmark + notes knowledge garden.")
 def _configure_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="%(levelname)s %(name)s %(message)s")
+
+
+def _resolve_paths(repo_dir: Path, data_dir: Path | None) -> tuple[Path, Path | None]:
+    return repo_dir, data_dir
 
 
 @app.command("init")
@@ -84,11 +90,28 @@ def import_chrome_cmd(
     profile_name: str = typer.Option("Default", "--profile-name", help="Chrome profile label (for logs)."),
     dedupe: DedupeMode = typer.Option(DedupeMode.both, "--dedupe", help="Deduplication strategy."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print changes without writing."),
+    watch: bool = typer.Option(False, "--watch", help="Continuously poll the Bookmarks file and import on change."),
+    interval: int = typer.Option(60, "--interval", min=1, help="Watch poll interval in seconds."),
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
     paths = init_storage(root)
+    if watch:
+        typer.echo(f"Watching {bookmarks_file} every {interval}s (dedupe={dedupe.value}, dry_run={dry_run}). Press Ctrl+C to stop.")
+        try:
+            watch_import_loop(
+                paths=paths,
+                bookmarks_file=bookmarks_file,
+                dedupe=dedupe,
+                interval_seconds=interval,
+                dry_run=dry_run,
+                profile_name=profile_name,
+            )
+        except KeyboardInterrupt:
+            typer.echo("Watch stopped.")
+        return
+
     stats = import_chrome_bookmarks(
         paths=paths,
         bookmarks_file=bookmarks_file,
@@ -156,6 +179,51 @@ def export_cmd(
     typer.echo(f"Exported {format.value} to {output_file}")
 
 
+@app.command("rebuild-index")
+def rebuild_index_cmd(
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Scan and validate without writing index.json."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    resolved_repo_dir, resolved_data_dir = _resolve_paths(repo_dir, data_dir)
+    paths = init_storage(resolved_repo_dir, data_dir=resolved_data_dir)
+    report = rebuild_index_with_report(paths, dry_run=dry_run)
+
+    mode_prefix = "DRY RUN " if dry_run else ""
+    typer.echo(
+        f"{mode_prefix}Rebuild complete: scanned={report.scanned} indexed={report.indexed} skipped={report.skipped} errors={len(report.errors)}"
+    )
+    for issue in report.errors:
+        typer.echo(f"- {issue.path}: {issue.error}")
+
+
+@app.command("serve")
+def serve_cmd(
+    host: str = typer.Option("127.0.0.1", "--host", help="Server host."),
+    port: int = typer.Option(8000, "--port", min=1, max=65535, help="Server port."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    open_browser: bool = typer.Option(False, "--open-browser/--no-open-browser", help="Open browser on startup."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    from link_garden.web.app import create_app
+
+    import uvicorn
+
+    resolved_repo_dir, resolved_data_dir = _resolve_paths(repo_dir, data_dir)
+    app_instance = create_app(repo_dir=resolved_repo_dir, data_dir=resolved_data_dir)
+    url = f"http://{host}:{port}/"
+    typer.echo(f"Serving link-garden at {url}")
+
+    if open_browser:
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+
+    uvicorn.run(app_instance, host=host, port=port, log_level="info")
+
+
 @app.command("doctor")
 def doctor_cmd(
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
@@ -166,8 +234,12 @@ def doctor_cmd(
     paths = init_storage(root)
 
     if rebuild_index:
-        rebuilt = rebuild_index_from_files(paths)
-        typer.echo(f"Rebuilt index with {len(rebuilt)} entries.")
+        report = rebuild_index_with_report(paths)
+        typer.echo(
+            f"Rebuilt index (prefer `rebuild-index`): scanned={report.scanned} indexed={report.indexed} skipped={report.skipped} errors={len(report.errors)}"
+        )
+        for issue in report.errors:
+            typer.echo(f"- {issue.path}: {issue.error}")
 
     entries = load_index(paths)
     issues: list[str] = []
