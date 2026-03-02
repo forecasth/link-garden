@@ -10,6 +10,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 INVALID_FILENAME_CHARS = re.compile(r"[<>:\"/\\|?*\x00-\x1F]")
 MULTI_DASH_RE = re.compile(r"-{2,}")
 SLUG_INVALID_RE = re.compile(r"[^a-z0-9]+")
+MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")
+MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s*", re.MULTILINE)
+MARKDOWN_PUNCT_RE = re.compile(r"[*_~>#-]+")
+WHITESPACE_RE = re.compile(r"\s+")
 
 
 def utc_now_iso() -> str:
@@ -92,6 +97,20 @@ def split_tags(raw_tags: str | list[str] | None) -> list[str]:
         seen.add(tag_key)
         output.append(tag)
     return output
+
+
+def strip_markdown(text: str) -> str:
+    value = MARKDOWN_LINK_RE.sub(r"\1", text)
+    value = MARKDOWN_CODE_RE.sub(r"\1", value)
+    value = MARKDOWN_HEADING_RE.sub("", value)
+    value = MARKDOWN_PUNCT_RE.sub(" ", value)
+    value = WHITESPACE_RE.sub(" ", value).strip()
+    return value
+
+
+def normalize_search_text(text: str) -> str:
+    lowered = strip_markdown(text).lower()
+    return WHITESPACE_RE.sub(" ", lowered).strip()
 
 
 def normalize_url(url: str) -> str:

@@ -1,26 +1,35 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import subprocess
+import sys
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import typer
 
+from link_garden.backup import BackupFormat, create_backup
+from link_garden.bookmarks import BookmarkRecord, find_records_by_url, load_record_by_id, persist_record, resolve_record
 from link_garden.chrome_import import DedupeMode, import_chrome_bookmarks, watch_import_loop
+from link_garden.doctor import doctor_fix, run_doctor
+from link_garden.enrich import DEFAULT_USER_AGENT, apply_enrichment_to_bookmark, fetch_url_metadata
 from link_garden.export import ExportFormat, export_bookmarks
 from link_garden.index import (
-    build_lookup_maps,
     entry_from_bookmark,
-    index_paths,
+    find_duplicate_entries,
     load_index,
-    rebuild_index_with_report,
     save_index,
+    search_entries,
+    rebuild_index_with_report,
     upsert_entry,
 )
 from link_garden.model import Bookmark
-from link_garden.storage import init_storage, list_bookmark_files, read_bookmark_file, relative_to_root, write_bookmark
-from link_garden.utils import generate_short_id, normalize_folder_path, normalize_url, split_tags, utc_now_iso
+from link_garden.storage import init_storage, read_bookmark_file, relative_to_root, write_bookmark
+from link_garden.utils import generate_short_id, normalize_folder_path, split_tags, utc_now_iso
 
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Local-first bookmark + notes knowledge garden.")
@@ -33,6 +42,45 @@ def _configure_logging(verbose: bool) -> None:
 
 def _resolve_paths(repo_dir: Path, data_dir: Path | None) -> tuple[Path, Path | None]:
     return repo_dir, data_dir
+
+
+def _looks_like_url(value: str) -> bool:
+    parsed = urlsplit(value.strip())
+    return bool(parsed.scheme and parsed.netloc)
+
+
+def _editor_command_for_platform(file_path: Path, editor_override: str | None = None) -> tuple[list[str] | str, bool]:
+    editor = (editor_override or os.environ.get("EDITOR", "")).strip()
+    if editor:
+        return f'{editor} "{file_path}"', True
+
+    if os.name == "nt":
+        return ["notepad", str(file_path)], False
+    if sys.platform == "darwin":
+        return ["open", "-e", str(file_path)], False
+
+    for candidate in ("sensible-editor", "nano", "vi"):
+        path = shutil.which(candidate)
+        if path:
+            return [path, str(file_path)], False
+    return ["nano", str(file_path)], False
+
+
+def _run_editor(file_path: Path, editor_override: str | None = None) -> None:
+    command, use_shell = _editor_command_for_platform(file_path, editor_override=editor_override)
+    subprocess.run(command, shell=use_shell, check=True)  # noqa: S602
+
+
+def _merge_tags(existing: list[str], incoming: list[str]) -> list[str]:
+    seen = {item.lower() for item in existing}
+    merged = existing[:]
+    for tag in incoming:
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(tag)
+    return merged
 
 
 @app.command("init")
@@ -72,6 +120,10 @@ def add_cmd(
         chrome_guid=None,
         notes=notes.strip(),
         archived=False,
+        description="",
+        fetched_at=None,
+        source_meta="",
+        canonical_url=None,
         body=notes.strip(),
     )
 
@@ -127,8 +179,10 @@ def import_chrome_cmd(
 @app.command("list")
 def list_cmd(
     tag: str | None = typer.Option(None, "--tag", help="Filter by tag."),
-    search: str | None = typer.Option(None, "--search", help="Text search in title/url/tags/folder."),
+    search: str | None = typer.Option(None, "--search", help="Text search across title/url/tags/folder/description/notes."),
     folder: str | None = typer.Option(None, "--folder", help="Filter by folder prefix."),
+    include_archived: bool = typer.Option(False, "--include-archived", help="Include archived bookmarks."),
+    recent: int | None = typer.Option(None, "--recent", min=1, help="Shortcut for most recent N bookmarks."),
     limit: int = typer.Option(50, "--limit", min=1, help="Maximum rows to print."),
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
@@ -137,25 +191,9 @@ def list_cmd(
     paths = init_storage(root)
     entries = load_index(paths)
 
-    filtered = entries
-    if tag:
-        tag_l = tag.lower()
-        filtered = [entry for entry in filtered if any(existing.lower() == tag_l for existing in entry.tags)]
-
-    if folder:
-        folder_prefix = normalize_folder_path(folder)
-        filtered = [entry for entry in filtered if normalize_folder_path(entry.folder_path).startswith(folder_prefix)]
-
-    if search:
-        needle = search.lower().strip()
-        filtered_search: list = []
-        for entry in filtered:
-            haystack = " ".join([entry.title, entry.url, " ".join(entry.tags), entry.folder_path]).lower()
-            if needle in haystack:
-                filtered_search.append(entry)
-        filtered = filtered_search
-
-    filtered = sorted(filtered, key=lambda item: item.saved_at, reverse=True)[:limit]
+    filtered = search_entries(entries, search=search, tag=tag, folder=folder, include_archived=include_archived)
+    effective_limit = recent if recent is not None else limit
+    filtered = filtered[:effective_limit]
     if not filtered:
         typer.echo("No bookmarks found.")
         return
@@ -163,7 +201,201 @@ def list_cmd(
     for entry in filtered:
         tag_text = ",".join(entry.tags) if entry.tags else "-"
         folder_text = entry.folder_path or "-"
-        typer.echo(f"{entry.saved_at}\t{entry.title}\t{entry.url}\t{tag_text}\t{folder_text}")
+        archived_label = "archived" if entry.archived else "active"
+        typer.echo(f"{entry.saved_at}\t{entry.title}\t{entry.url}\t{tag_text}\t{folder_text}\t{archived_label}")
+
+
+@app.command("duplicates")
+def duplicates_cmd(
+    by: str = typer.Option("url", "--by", help="Duplicate strategy. Currently supports: url"),
+    include_archived: bool = typer.Option(False, "--include-archived", help="Include archived bookmarks."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    if by != "url":
+        raise typer.BadParameter("Only --by url is supported in v0.2")
+
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    entries = load_index(paths)
+    if not include_archived:
+        entries = [entry for entry in entries if not entry.archived]
+    groups = find_duplicate_entries(entries)
+    if not groups:
+        typer.echo("No duplicates found.")
+        return
+
+    typer.echo(f"Found {len(groups)} duplicate URL group(s):")
+    for key, group in sorted(groups.items()):
+        typer.echo(f"- {key}")
+        for entry in sorted(group, key=lambda item: item.saved_at, reverse=True):
+            typer.echo(f"  {entry.id}\t{entry.saved_at}\t{entry.title}\t{entry.path}")
+
+
+@app.command("edit")
+def edit_cmd(
+    id_or_path: str = typer.Argument(..., help="Bookmark id (preferred) or markdown file path."),
+    editor: str | None = typer.Option(None, "--editor", help="Editor command override."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    record = resolve_record(paths, id_or_path)
+    _run_editor(record.path, editor_override=editor)
+
+    bookmark = read_bookmark_file(record.path)
+    synced = persist_record(
+        paths,
+        BookmarkRecord(bookmark=bookmark, path=record.path, rel_path=record.rel_path, entry=record.entry),
+        rename_file=False,
+    )
+    tags_text = ",".join(synced.bookmark.tags) if synced.bookmark.tags else "-"
+    typer.echo(
+        f"Updated {synced.bookmark.id}: title={synced.bookmark.title!r} tags={tags_text} archived={synced.bookmark.archived}"
+    )
+
+
+@app.command("tag")
+def tag_cmd(
+    bookmark_id: str = typer.Argument(..., help="Bookmark id."),
+    add: str = typer.Option("", "--add", help="Comma-separated tags to add."),
+    remove: str = typer.Option("", "--remove", help="Comma-separated tags to remove."),
+    set_tags: str = typer.Option("", "--set", help="Replace tags with comma-separated list."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    if not (add.strip() or remove.strip() or set_tags.strip()):
+        raise typer.BadParameter("Provide at least one of --add, --remove, or --set")
+
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    record = load_record_by_id(paths, bookmark_id)
+
+    tags = record.bookmark.tags
+    if set_tags.strip():
+        tags = split_tags(set_tags)
+    if add.strip():
+        tags = _merge_tags(tags, split_tags(add))
+    if remove.strip():
+        remove_set = {item.lower() for item in split_tags(remove)}
+        tags = [item for item in tags if item.lower() not in remove_set]
+
+    record.bookmark.tags = tags
+    synced = persist_record(paths, record, rename_file=False)
+    typer.echo(f"Updated tags for {synced.bookmark.id}: {','.join(synced.bookmark.tags) if synced.bookmark.tags else '-'}")
+
+
+@app.command("archive")
+def archive_cmd(
+    bookmark_id: str = typer.Argument(..., help="Bookmark id."),
+    yes: bool = typer.Option(False, "--yes", help="Skip confirmation."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    if not yes and not typer.confirm(f"Archive bookmark {bookmark_id}?"):
+        raise typer.Abort()
+
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    record = load_record_by_id(paths, bookmark_id)
+    record.bookmark.archived = True
+    persist_record(paths, record, rename_file=False)
+    typer.echo(f"Archived {bookmark_id}")
+
+
+@app.command("unarchive")
+def unarchive_cmd(
+    bookmark_id: str = typer.Argument(..., help="Bookmark id."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    record = load_record_by_id(paths, bookmark_id)
+    record.bookmark.archived = False
+    persist_record(paths, record, rename_file=False)
+    typer.echo(f"Unarchived {bookmark_id}")
+
+
+@app.command("move")
+def move_cmd(
+    bookmark_id: str = typer.Argument(..., help="Bookmark id."),
+    folder: str = typer.Option(..., "--folder", help="Folder path metadata (does not move file)."),
+    rename_file: bool = typer.Option(False, "--rename-file", help="Optionally rename file deterministically."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    record = load_record_by_id(paths, bookmark_id)
+    record.bookmark.folder_path = normalize_folder_path(folder)
+    synced = persist_record(paths, record, rename_file=rename_file)
+    typer.echo(f"Moved {bookmark_id} to folder={synced.bookmark.folder_path} file={synced.rel_path}")
+
+
+@app.command("enrich")
+def enrich_cmd(
+    id_or_url: str = typer.Argument(..., help="Bookmark id or URL."),
+    timeout: float = typer.Option(5.0, "--timeout", min=0.1, help="Network timeout in seconds."),
+    user_agent: str = typer.Option(DEFAULT_USER_AGENT, "--user-agent", help="HTTP user-agent."),
+    no_network: bool = typer.Option(False, "--no-network", help="Disable network calls."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview changes only."),
+    overwrite_title: bool = typer.Option(False, "--overwrite-title", help="Overwrite title when metadata has title."),
+    all_matches: bool = typer.Option(False, "--all", help="When URL matches multiple bookmarks, enrich all."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    paths = init_storage(repo_dir, data_dir=data_dir)
+
+    records: list[BookmarkRecord]
+    if _looks_like_url(id_or_url):
+        records = find_records_by_url(paths, id_or_url, include_archived=True)
+        if not records:
+            raise typer.BadParameter(f"No bookmarks matched URL: {id_or_url}")
+        if len(records) > 1 and not all_matches:
+            raise typer.BadParameter(f"URL matched {len(records)} bookmarks. Re-run with --all to enrich all matches.")
+    else:
+        records = [load_record_by_id(paths, id_or_url)]
+
+    updated = 0
+    failed = 0
+    for record in records:
+        metadata = fetch_url_metadata(
+            record.bookmark.url,
+            timeout=timeout,
+            user_agent=user_agent,
+            no_network=no_network,
+        )
+        if not metadata.ok:
+            failed += 1
+            typer.echo(f"FAILED {record.bookmark.id}: {metadata.error}")
+            continue
+
+        preview_title = metadata.title or record.bookmark.title
+        preview_description = metadata.description or record.bookmark.description
+        if dry_run:
+            preview_description_text = (preview_description[:80] if preview_description else "")
+            typer.echo(
+                f"DRY RUN {record.bookmark.id}: title={preview_title!r} description={preview_description_text!r}"
+            )
+            updated += 1
+            continue
+
+        apply_enrichment_to_bookmark(record.bookmark, metadata, overwrite_title=overwrite_title)
+        persist_record(paths, record, rename_file=False)
+        updated += 1
+        typer.echo(f"Enriched {record.bookmark.id}: title={record.bookmark.title!r}")
+
+    typer.echo(f"Enrichment complete: matched={len(records)} updated={updated} failed={failed}")
 
 
 @app.command("export")
@@ -177,6 +409,21 @@ def export_cmd(
     paths = init_storage(root)
     output_file = export_bookmarks(paths, export_format=format, out_dir=out)
     typer.echo(f"Exported {format.value} to {output_file}")
+
+
+@app.command("backup")
+def backup_cmd(
+    out: Path = typer.Option(..., "--out", help="Backup output directory."),
+    format: BackupFormat = typer.Option(BackupFormat.zip, "--format", help="Backup format."),
+    include_index: bool = typer.Option(True, "--include-index/--no-include-index", help="Include data/index.json."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    report = create_backup(paths=paths, out_dir=out, backup_format=format, include_index=include_index)
+    typer.echo(f"Backup created: {report.output_path} (files={report.file_count})")
 
 
 @app.command("rebuild-index")
@@ -206,6 +453,9 @@ def serve_cmd(
     repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
     open_browser: bool = typer.Option(False, "--open-browser/--no-open-browser", help="Open browser on startup."),
+    enable_write: bool = typer.Option(False, "--enable-write", help="Enable write endpoints in web UI."),
+    enable_capture: bool = typer.Option(False, "--enable-capture", help="Enable /capture endpoint even in read-only mode."),
+    capture_enrich: bool = typer.Option(False, "--capture-enrich", help="Try enrichment on capture requests."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
@@ -214,7 +464,13 @@ def serve_cmd(
     import uvicorn
 
     resolved_repo_dir, resolved_data_dir = _resolve_paths(repo_dir, data_dir)
-    app_instance = create_app(repo_dir=resolved_repo_dir, data_dir=resolved_data_dir)
+    app_instance = create_app(
+        repo_dir=resolved_repo_dir,
+        data_dir=resolved_data_dir,
+        enable_write=enable_write,
+        enable_capture=enable_capture,
+        capture_enrich=capture_enrich,
+    )
     url = f"http://{host}:{port}/"
     typer.echo(f"Serving link-garden at {url}")
 
@@ -228,6 +484,7 @@ def serve_cmd(
 def doctor_cmd(
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
     rebuild_index: bool = typer.Option(False, "--rebuild-index", help="Rebuild index from Markdown files first."),
+    fix: bool = typer.Option(False, "--fix", help="Apply safe fixes (currently: rebuild index)."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
@@ -241,50 +498,19 @@ def doctor_cmd(
         for issue in report.errors:
             typer.echo(f"- {issue.path}: {issue.error}")
 
-    entries = load_index(paths)
-    issues: list[str] = []
+    if fix:
+        fixed_indexed, fixed_skipped = doctor_fix(paths)
+        typer.echo(f"Doctor fix applied: rebuilt index (indexed={fixed_indexed}, skipped={fixed_skipped})")
 
-    seen_ids: set[str] = set()
-    seen_urls: dict[str, str] = {}
-    by_guid, _ = build_lookup_maps(entries)
-    if len(by_guid) < len([entry for entry in entries if entry.chrome_guid]):
-        issues.append("Duplicate chrome_guid values found in index.")
-
-    for entry in entries:
-        if entry.id in seen_ids:
-            issues.append(f"Duplicate id in index: {entry.id}")
-        seen_ids.add(entry.id)
-
-        url_key = normalize_url(entry.url)
-        if url_key in seen_urls and seen_urls[url_key] != entry.id:
-            issues.append(f"Duplicate normalized URL in index: {entry.url}")
-        seen_urls[url_key] = entry.id
-
-        path = (paths.root / entry.path).resolve()
-        if not path.exists():
-            issues.append(f"Missing bookmark file: {entry.path}")
-            continue
-        try:
-            bookmark = read_bookmark_file(path)
-        except Exception as exc:  # noqa: BLE001
-            issues.append(f"Unreadable bookmark file ({entry.path}): {exc}")
-            continue
-        if bookmark.id != entry.id:
-            issues.append(f"ID mismatch for {entry.path}: index={entry.id} file={bookmark.id}")
-
-    indexed_paths = index_paths(entries, paths.root)
-    file_paths = {path.resolve() for path in list_bookmark_files(paths)}
-    orphan_files = sorted(file_paths - indexed_paths)
-    for orphan in orphan_files:
-        issues.append(f"Bookmark file not present in index: {relative_to_root(paths, orphan)}")
-
-    if issues:
-        typer.echo("Doctor found issues:")
-        for issue in issues:
-            typer.echo(f"- {issue}")
+    report = run_doctor(paths)
+    typer.echo(f"Doctor summary: scanned_files={report.scanned_files} index_entries={report.index_entries} issues={len(report.issues)}")
+    if report.issues:
+        for issue in report.issues:
+            location = f" [{issue.path}]" if issue.path else ""
+            typer.echo(f"- {issue.code}{location}: {issue.message}")
         raise typer.Exit(code=1)
 
-    typer.echo("Doctor check passed. Index and files are consistent.")
+    typer.echo("Doctor check passed.")
 
 
 def main() -> None:

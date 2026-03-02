@@ -8,6 +8,18 @@
 </head>
 <body>
   <main class="layout">
+    <div class="row" style="justify-content:space-between; margin-bottom:1rem;">
+      <div class="row">
+        <a class="btn" href="/">All</a>
+        <a class="btn" href="/recent">Recent</a>
+        <a class="btn" href="/duplicates">Duplicates</a>
+      </div>
+      {% if enable_write %}
+      <span class="badge">Write enabled</span>
+      {% else %}
+      <span class="badge">Read-only</span>
+      {% endif %}
+    </div>
     {% block content %}{% endblock %}
   </main>
 </body>

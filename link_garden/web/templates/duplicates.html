@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Duplicate URLs</h1>
+<p class="muted">Groups are based on normalized URL.</p>
+
+<div style="display:grid; grid-template-columns:240px 1fr; gap:1rem;">
+  <aside class="card">
+    <h3 style="margin-bottom:0.5rem;">Folders</h3>
+    <a href="/duplicates{% if include_archived %}?include_archived=1{% endif %}">All folders</a>
+    <ul style="margin-top:0.5rem; padding-left:1rem;">
+      {% for node in folder_tree recursive %}
+      <li>
+        {{ node.name }} <span class="muted">({{ node.count }})</span>
+        {% if node.children %}
+        <ul style="padding-left:1rem;">{{ loop(node.children) }}</ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </aside>
+
+  <section>
+    <form method="get" action="/duplicates" class="row" style="margin-bottom:0.8rem;">
+      <label class="row">
+        <input type="checkbox" name="include_archived" value="1" {% if include_archived %}checked{% endif %} />
+        <span>Include archived</span>
+      </label>
+      <button class="btn" type="submit">Apply</button>
+    </form>
+
+    {% if groups %}
+      {% for normalized, entries in groups.items() %}
+      <article class="card">
+        <h3 style="margin-bottom:0.5rem;">{{ normalized }}</h3>
+        {% for entry in entries %}
+        <div style="margin-bottom:0.45rem;">
+          <a href="/bookmark/{{ entry.id }}"><strong>{{ entry.title }}</strong></a>
+          <span class="meta">{{ entry.saved_at }} | {{ entry.id }}</span>
+        </div>
+        {% endfor %}
+      </article>
+      {% endfor %}
+    {% else %}
+    <p>No duplicate URL groups found.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

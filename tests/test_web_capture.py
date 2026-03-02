@@ -8,7 +8,7 @@ from link_garden.web.app import create_app
 
 
 def test_capture_endpoint_creates_bookmark_and_redirects(tmp_path: Path) -> None:
-    app = create_app(repo_dir=tmp_path)
+    app = create_app(repo_dir=tmp_path, enable_capture=True)
     client = TestClient(app)
 
     response = client.get(
@@ -38,7 +38,7 @@ def test_capture_endpoint_creates_bookmark_and_redirects(tmp_path: Path) -> None
 
 
 def test_capture_endpoint_dedupes_by_normalized_url(tmp_path: Path) -> None:
-    app = create_app(repo_dir=tmp_path)
+    app = create_app(repo_dir=tmp_path, enable_capture=True)
     client = TestClient(app)
 
     first = client.get(
@@ -70,3 +70,10 @@ def test_capture_endpoint_dedupes_by_normalized_url(tmp_path: Path) -> None:
     assert bookmark.title == "Two"
     assert bookmark.tags == ["tag1", "tag2"]
     assert "extra note" in bookmark.body
+
+
+def test_capture_endpoint_forbidden_when_write_and_capture_disabled(tmp_path: Path) -> None:
+    app = create_app(repo_dir=tmp_path)
+    client = TestClient(app)
+    response = client.get("/capture", params={"url": "https://example.com"}, follow_redirects=False)
+    assert response.status_code == 403

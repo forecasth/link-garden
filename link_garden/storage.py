@@ -80,6 +80,12 @@ def _markdown_to_bookmark(text: str, source_path: Path) -> Bookmark:
     if not isinstance(saved_at, str):
         raise ValueError(f"Missing or invalid saved_at in {source_path}")
 
+    cleaned_body = body
+    if cleaned_body.startswith("\r\n"):
+        cleaned_body = cleaned_body[2:]
+    elif cleaned_body.startswith("\n"):
+        cleaned_body = cleaned_body[1:]
+
     bookmark = Bookmark(
         id=str(metadata.get("id", "")),
         title=str(metadata.get("title", "")),
@@ -91,7 +97,11 @@ def _markdown_to_bookmark(text: str, source_path: Path) -> Bookmark:
         chrome_guid=metadata.get("chrome_guid"),
         notes=str(metadata.get("notes", "")),
         archived=bool(metadata.get("archived", False)),
-        body=body.rstrip("\n"),
+        description=str(metadata.get("description", "")),
+        fetched_at=metadata.get("fetched_at"),
+        source_meta=str(metadata.get("source_meta", "")),
+        canonical_url=metadata.get("canonical_url"),
+        body=cleaned_body.rstrip("\n"),
     )
     if not bookmark.id:
         raise ValueError(f"Missing id in {source_path}")

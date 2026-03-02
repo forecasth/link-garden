@@ -16,6 +16,10 @@ class Bookmark(BaseModel):
     chrome_guid: str | None = None
     notes: str = ""
     archived: bool = False
+    description: str = ""
+    fetched_at: str | None = None
+    source_meta: str = ""
+    canonical_url: str | None = None
     body: str = ""
 
     def to_frontmatter(self) -> dict[str, object]:
@@ -30,6 +34,10 @@ class Bookmark(BaseModel):
             "chrome_guid": self.chrome_guid,
             "notes": self.notes,
             "archived": self.archived,
+            "description": self.description,
+            "fetched_at": self.fetched_at,
+            "source_meta": self.source_meta,
+            "canonical_url": self.canonical_url,
         }
 
 
@@ -44,3 +52,6 @@ class IndexEntry(BaseModel):
     saved_at: str
     folder_path: str = ""
     chrome_guid: str | None = None
+    archived: bool = False
+    description: str = ""
+    search_text: str = ""

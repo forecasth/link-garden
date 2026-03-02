@@ -8,6 +8,9 @@
   file={{ source_path }}
 </p>
 <p><a class="btn" href="{{ bookmark.url }}" target="_blank" rel="noopener">Open URL</a></p>
+{% if bookmark.description %}
+<p class="muted">{{ bookmark.description }}</p>
+{% endif %}
 
 {% if bookmark.tags %}
 <div style="margin-bottom:0.8rem;">
@@ -15,6 +18,36 @@
   <span class="tag">{{ tag_item }}</span>
   {% endfor %}
 </div>
+{% endif %}
+
+{% if enable_write %}
+<section class="card">
+  <h2>Edit Tags</h2>
+  <form method="post" action="/api/bookmarks/{{ bookmark.id }}/tags" class="row">
+    <input class="input" style="max-width:220px;" name="add" placeholder="Add tags: t1,t2" />
+    <input class="input" style="max-width:220px;" name="remove" placeholder="Remove tags: t1,t2" />
+    <input class="input" style="max-width:220px;" name="set_tags" placeholder="Set tags: t1,t2" />
+    <button class="btn" type="submit">Save tags</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Archive</h2>
+  <form method="post" action="/api/bookmarks/{{ bookmark.id }}/archive" class="row">
+    <input type="hidden" name="archived" value="{% if bookmark.archived %}0{% else %}1{% endif %}" />
+    <button class="btn" type="submit">{% if bookmark.archived %}Unarchive{% else %}Archive{% endif %}</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Edit Notes</h2>
+  <form method="post" action="/api/bookmarks/{{ bookmark.id }}/notes">
+    <textarea class="input" name="notes" rows="10">{{ bookmark.body }}</textarea>
+    <div style="margin-top:0.6rem;">
+      <button class="btn" type="submit">Save notes</button>
+    </div>
+  </form>
+</section>
 {% endif %}
 
 <section class="card">

@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 from link_garden.model import Bookmark, IndexEntry
 from link_garden.storage import StoragePaths, ensure_index_file, list_bookmark_files, read_bookmark_file, relative_to_root
-from link_garden.utils import normalize_url
+from link_garden.utils import normalize_search_text, normalize_url, strip_markdown
 
 
 @dataclass
@@ -43,6 +44,17 @@ def save_index(paths: StoragePaths, entries: list[IndexEntry]) -> None:
 
 
 def entry_from_bookmark(bookmark: Bookmark, rel_path: str) -> IndexEntry:
+    notes_text = bookmark.body or bookmark.notes
+    search_blob = " ".join(
+        [
+            bookmark.title,
+            bookmark.url,
+            " ".join(bookmark.tags),
+            bookmark.folder_path,
+            bookmark.description,
+            strip_markdown(notes_text),
+        ]
+    )
     return IndexEntry(
         id=bookmark.id,
         title=bookmark.title,
@@ -52,6 +64,9 @@ def entry_from_bookmark(bookmark: Bookmark, rel_path: str) -> IndexEntry:
         saved_at=bookmark.saved_at,
         folder_path=bookmark.folder_path,
         chrome_guid=bookmark.chrome_guid,
+        archived=bookmark.archived,
+        description=bookmark.description,
+        search_text=normalize_search_text(search_blob),
     )
 
 
@@ -97,3 +112,45 @@ def build_lookup_maps(entries: list[IndexEntry]) -> tuple[dict[str, IndexEntry],
 
 def index_paths(entries: list[IndexEntry], root: Path) -> set[Path]:
     return {(root / entry.path).resolve() for entry in entries}
+
+
+def search_entries(
+    entries: Iterable[IndexEntry],
+    *,
+    search: str | None = None,
+    tag: str | None = None,
+    folder: str | None = None,
+    include_archived: bool = False,
+) -> list[IndexEntry]:
+    result = list(entries)
+    if not include_archived:
+        result = [entry for entry in result if not entry.archived]
+
+    if tag:
+        tag_key = tag.lower().strip()
+        result = [entry for entry in result if any(item.lower() == tag_key for item in entry.tags)]
+
+    if folder:
+        folder_key = folder.strip().replace("\\", "/").strip("/")
+        result = [entry for entry in result if entry.folder_path.replace("\\", "/").strip("/").startswith(folder_key)]
+
+    if search:
+        needle = normalize_search_text(search)
+        filtered: list[IndexEntry] = []
+        for entry in result:
+            haystack = entry.search_text or normalize_search_text(
+                " ".join([entry.title, entry.url, " ".join(entry.tags), entry.folder_path, entry.description])
+            )
+            if needle in haystack:
+                filtered.append(entry)
+        result = filtered
+
+    return sorted(result, key=lambda item: item.saved_at, reverse=True)
+
+
+def find_duplicate_entries(entries: Iterable[IndexEntry]) -> dict[str, list[IndexEntry]]:
+    groups: dict[str, list[IndexEntry]] = {}
+    for entry in entries:
+        key = normalize_url(entry.url)
+        groups.setdefault(key, []).append(entry)
+    return {key: grouped for key, grouped in groups.items() if len(grouped) > 1}
