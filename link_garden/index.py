@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Iterable
 
 from link_garden.model import Bookmark, IndexEntry
-from link_garden.storage import StoragePaths, ensure_index_file, list_bookmark_files, read_bookmark_file, relative_to_root
+from link_garden.security import Visibility
+from link_garden.storage import (
+    StoragePaths,
+    ensure_index_file,
+    list_bookmark_files,
+    read_bookmark_file,
+    relative_to_root,
+)
 from link_garden.utils import normalize_search_text, normalize_url, strip_markdown
 
 
@@ -67,6 +74,7 @@ def entry_from_bookmark(bookmark: Bookmark, rel_path: str) -> IndexEntry:
         archived=bookmark.archived,
         description=bookmark.description,
         search_text=normalize_search_text(search_blob),
+        visibility=bookmark.visibility,
     )
 
 
@@ -120,6 +128,7 @@ def search_entries(
     search: str | None = None,
     tag: str | None = None,
     folder: str | None = None,
+    visibility: Visibility | None = None,
     include_archived: bool = False,
 ) -> list[IndexEntry]:
     result = list(entries)
@@ -133,6 +142,9 @@ def search_entries(
     if folder:
         folder_key = folder.strip().replace("\\", "/").strip("/")
         result = [entry for entry in result if entry.folder_path.replace("\\", "/").strip("/").startswith(folder_key)]
+
+    if visibility is not None:
+        result = [entry for entry in result if entry.visibility == visibility]
 
     if search:
         needle = normalize_search_text(search)

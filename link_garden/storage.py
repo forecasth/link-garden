@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 
 from link_garden.model import Bookmark
+from link_garden.security import Visibility
 from link_garden.utils import build_bookmark_filename, ensure_utc_iso, split_tags
 
 FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?(.*)$", re.DOTALL)
@@ -102,6 +103,7 @@ def _markdown_to_bookmark(text: str, source_path: Path) -> Bookmark:
         source_meta=str(metadata.get("source_meta", "")),
         canonical_url=metadata.get("canonical_url"),
         body=cleaned_body.rstrip("\n"),
+        visibility=metadata.get("visibility", Visibility.private.value),
     )
     if not bookmark.id:
         raise ValueError(f"Missing id in {source_path}")

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import http.server
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import webbrowser
 from pathlib import Path
@@ -15,24 +17,29 @@ import typer
 from link_garden.backup import BackupFormat, create_backup
 from link_garden.bookmarks import BookmarkRecord, find_records_by_url, load_record_by_id, persist_record, resolve_record
 from link_garden.chrome_import import DedupeMode, import_chrome_bookmarks, watch_import_loop
+from link_garden.config import AppConfig, ensure_config_file, load_config
 from link_garden.doctor import doctor_fix, run_doctor
 from link_garden.enrich import DEFAULT_USER_AGENT, apply_enrichment_to_bookmark, fetch_url_metadata
 from link_garden.export import ExportFormat, export_bookmarks
+from link_garden.hub import export_hub_directory
 from link_garden.index import (
     entry_from_bookmark,
     find_duplicate_entries,
     load_index,
+    rebuild_index_with_report,
     save_index,
     search_entries,
-    rebuild_index_with_report,
     upsert_entry,
 )
 from link_garden.model import Bookmark
+from link_garden.security import ExportScope, Visibility, is_local_host, scope_is_broader_than_public
 from link_garden.storage import init_storage, read_bookmark_file, relative_to_root, write_bookmark
 from link_garden.utils import generate_short_id, normalize_folder_path, split_tags, utc_now_iso
 
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Local-first bookmark + notes knowledge garden.")
+hub_app = typer.Typer(help="Hub directory tools.")
+app.add_typer(hub_app, name="hub")
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -83,6 +90,45 @@ def _merge_tags(existing: list[str], incoming: list[str]) -> list[str]:
     return merged
 
 
+def _load_app_config(root: Path) -> AppConfig:
+    config, warnings = load_config(root.resolve())
+    for warning in warnings:
+        typer.secho(f"Config warning: {warning}", fg=typer.colors.YELLOW)
+    return config
+
+
+def _warn_if_non_public_scope(scope: ExportScope, *, context: str) -> None:
+    if scope_is_broader_than_public(scope):
+        typer.secho(
+            f"WARNING: {context} includes non-public entries (scope={scope.value}).",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+
+
+def _serve_directory(directory: Path, host: str, port: int, open_browser: bool) -> None:
+    class DirectoryHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, directory=str(directory), **kwargs)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+            logger.info("http_server " + format, *args)
+
+    handler_cls = DirectoryHandler
+    server = http.server.ThreadingHTTPServer((host, port), handler_cls)
+    url = f"http://{host}:{port}/"
+    typer.echo(f"Serving static export at {url} (directory: {directory})")
+    if open_browser:
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        typer.echo("Server stopped.")
+    finally:
+        server.server_close()
+
+
 @app.command("init")
 def init_cmd(
     directory: Path = typer.Argument(..., help="Project directory to initialize."),
@@ -90,9 +136,12 @@ def init_cmd(
 ) -> None:
     _configure_logging(verbose)
     paths = init_storage(directory)
+    config_file, created = ensure_config_file(paths.root)
     typer.echo(f"Initialized link-garden at {paths.root}")
     typer.echo(f"- bookmarks: {paths.bookmarks_dir}")
     typer.echo(f"- index: {paths.index_file}")
+    if created:
+        typer.echo(f"- config: {config_file}")
 
 
 @app.command("add")
@@ -108,6 +157,7 @@ def add_cmd(
 ) -> None:
     _configure_logging(verbose)
     paths = init_storage(root)
+    config = _load_app_config(paths.root)
 
     bookmark = Bookmark(
         id=generate_short_id(),
@@ -125,6 +175,7 @@ def add_cmd(
         source_meta="",
         canonical_url=None,
         body=notes.strip(),
+        visibility=config.default_visibility,
     )
 
     output_path = write_bookmark(paths, bookmark)
@@ -149,6 +200,7 @@ def import_chrome_cmd(
 ) -> None:
     _configure_logging(verbose)
     paths = init_storage(root)
+    config = _load_app_config(paths.root)
     if watch:
         typer.echo(f"Watching {bookmarks_file} every {interval}s (dedupe={dedupe.value}, dry_run={dry_run}). Press Ctrl+C to stop.")
         try:
@@ -159,6 +211,7 @@ def import_chrome_cmd(
                 interval_seconds=interval,
                 dry_run=dry_run,
                 profile_name=profile_name,
+                default_visibility=config.default_visibility,
             )
         except KeyboardInterrupt:
             typer.echo("Watch stopped.")
@@ -170,6 +223,7 @@ def import_chrome_cmd(
         dedupe=dedupe,
         dry_run=dry_run,
         profile_name=profile_name,
+        default_visibility=config.default_visibility,
     )
 
     mode_label = "DRY RUN " if dry_run else ""
@@ -181,6 +235,7 @@ def list_cmd(
     tag: str | None = typer.Option(None, "--tag", help="Filter by tag."),
     search: str | None = typer.Option(None, "--search", help="Text search across title/url/tags/folder/description/notes."),
     folder: str | None = typer.Option(None, "--folder", help="Filter by folder prefix."),
+    visibility: Visibility | None = typer.Option(None, "--visibility", help="Filter by visibility."),
     include_archived: bool = typer.Option(False, "--include-archived", help="Include archived bookmarks."),
     recent: int | None = typer.Option(None, "--recent", min=1, help="Shortcut for most recent N bookmarks."),
     limit: int = typer.Option(50, "--limit", min=1, help="Maximum rows to print."),
@@ -191,7 +246,14 @@ def list_cmd(
     paths = init_storage(root)
     entries = load_index(paths)
 
-    filtered = search_entries(entries, search=search, tag=tag, folder=folder, include_archived=include_archived)
+    filtered = search_entries(
+        entries,
+        search=search,
+        tag=tag,
+        folder=folder,
+        visibility=visibility,
+        include_archived=include_archived,
+    )
     effective_limit = recent if recent is not None else limit
     filtered = filtered[:effective_limit]
     if not filtered:
@@ -202,7 +264,7 @@ def list_cmd(
         tag_text = ",".join(entry.tags) if entry.tags else "-"
         folder_text = entry.folder_path or "-"
         archived_label = "archived" if entry.archived else "active"
-        typer.echo(f"{entry.saved_at}\t{entry.title}\t{entry.url}\t{tag_text}\t{folder_text}\t{archived_label}")
+        typer.echo(f"{entry.saved_at}\t{entry.title}\t{entry.url}\t{entry.visibility.value}\t{tag_text}\t{folder_text}\t{archived_label}")
 
 
 @app.command("duplicates")
@@ -287,6 +349,37 @@ def tag_cmd(
     record.bookmark.tags = tags
     synced = persist_record(paths, record, rename_file=False)
     typer.echo(f"Updated tags for {synced.bookmark.id}: {','.join(synced.bookmark.tags) if synced.bookmark.tags else '-'}")
+
+
+@app.command("set-visibility")
+def set_visibility_cmd(
+    id: str | None = typer.Option(None, "--id", help="Bookmark id."),
+    url: str | None = typer.Option(None, "--url", help="Bookmark URL (updates all normalized URL matches)."),
+    visibility: Visibility = typer.Option(..., "--visibility", help="Visibility to apply."),
+    repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
+    data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    if bool(id) == bool(url):
+        raise typer.BadParameter("Provide exactly one of --id or --url")
+
+    paths = init_storage(repo_dir, data_dir=data_dir)
+    records: list[BookmarkRecord]
+    if id:
+        records = [load_record_by_id(paths, id)]
+    else:
+        assert url is not None
+        records = find_records_by_url(paths, url, include_archived=True)
+        if not records:
+            raise typer.BadParameter(f"No bookmarks matched URL: {url}")
+
+    for record in records:
+        record.bookmark.visibility = visibility
+        persist_record(paths, record, rename_file=False)
+
+    target_label = f"id={id}" if id else f"url={url}"
+    typer.echo(f"Updated visibility for {len(records)} bookmark(s) ({target_label}) -> {visibility.value}")
 
 
 @app.command("archive")
@@ -402,13 +495,31 @@ def enrich_cmd(
 def export_cmd(
     format: ExportFormat = typer.Option(..., "--format", help="Export format."),
     out: Path = typer.Option(..., "--out", help="Output directory."),
+    scope: ExportScope | None = typer.Option(None, "--scope", help="Export scope."),
+    dangerous_all: bool = typer.Option(
+        False,
+        "--dangerous-all",
+        help="Required with --scope all to confirm private data export.",
+    ),
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
     paths = init_storage(root)
-    output_file = export_bookmarks(paths, export_format=format, out_dir=out)
-    typer.echo(f"Exported {format.value} to {output_file}")
+    config = _load_app_config(paths.root)
+    effective_scope = scope or config.export_default_scope
+    _warn_if_non_public_scope(effective_scope, context="Export")
+    try:
+        output_file = export_bookmarks(
+            paths,
+            export_format=format,
+            out_dir=out,
+            scope=effective_scope,
+            dangerous_all=dangerous_all,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Exported {format.value} to {output_file} (scope={effective_scope.value})")
 
 
 @app.command("backup")
@@ -448,36 +559,62 @@ def rebuild_index_cmd(
 
 @app.command("serve")
 def serve_cmd(
-    host: str = typer.Option("127.0.0.1", "--host", help="Server host."),
+    host: str | None = typer.Option(None, "--host", help="Server host (defaults to config/server secure default)."),
     port: int = typer.Option(8000, "--port", min=1, max=65535, help="Server port."),
     repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
+    export_mode: ExportScope | None = typer.Option(None, "--export-mode", help="Scope to export before serving."),
+    dangerous_all: bool = typer.Option(False, "--dangerous-all", help="Required with --export-mode all."),
+    static_dir: Path | None = typer.Option(
+        None,
+        "--static-dir",
+        help="Serve an existing exported static directory instead of generating a temp export.",
+    ),
+    allow_remote: bool = typer.Option(False, "--allow-remote", help="Required when binding to non-localhost."),
     open_browser: bool = typer.Option(False, "--open-browser/--no-open-browser", help="Open browser on startup."),
-    enable_write: bool = typer.Option(False, "--enable-write", help="Enable write endpoints in web UI."),
-    enable_capture: bool = typer.Option(False, "--enable-capture", help="Enable /capture endpoint even in read-only mode."),
-    capture_enrich: bool = typer.Option(False, "--capture-enrich", help="Try enrichment on capture requests."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
-    from link_garden.web.app import create_app
-
-    import uvicorn
-
     resolved_repo_dir, resolved_data_dir = _resolve_paths(repo_dir, data_dir)
-    app_instance = create_app(
-        repo_dir=resolved_repo_dir,
-        data_dir=resolved_data_dir,
-        enable_write=enable_write,
-        enable_capture=enable_capture,
-        capture_enrich=capture_enrich,
-    )
-    url = f"http://{host}:{port}/"
-    typer.echo(f"Serving link-garden at {url}")
+    paths = init_storage(resolved_repo_dir, data_dir=resolved_data_dir)
+    config = _load_app_config(paths.root)
+    effective_host = host or config.server_bind_host
+    effective_scope = export_mode or config.serve_default_scope
 
-    if open_browser:
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    if not is_local_host(effective_host):
+        if config.require_allow_remote and not allow_remote:
+            raise typer.BadParameter(
+                f"Refusing to bind to {effective_host}. Re-run with --allow-remote for explicit opt-in.",
+            )
+        typer.secho(
+            f"WARNING: Binding to non-localhost address ({effective_host}). Ensure reverse proxy auth/firewall is enabled.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
 
-    uvicorn.run(app_instance, host=host, port=port, log_level="info")
+    _warn_if_non_public_scope(effective_scope, context="Serve export")
+
+    if static_dir is not None:
+        target_dir = static_dir.resolve()
+        if not target_dir.exists() or not target_dir.is_dir():
+            raise typer.BadParameter(f"Static directory does not exist: {target_dir}")
+        _serve_directory(target_dir, effective_host, port, open_browser)
+        return
+
+    with tempfile.TemporaryDirectory(prefix="link-garden-serve-") as temp_dir:
+        export_dir = Path(temp_dir)
+        try:
+            output_file = export_bookmarks(
+                paths,
+                export_format=ExportFormat.html,
+                out_dir=export_dir,
+                scope=effective_scope,
+                dangerous_all=dangerous_all,
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+        typer.echo(f"Prepared temporary export: {output_file} (scope={effective_scope.value})")
+        _serve_directory(export_dir, effective_host, port, open_browser)
 
 
 @app.command("doctor")
@@ -511,6 +648,17 @@ def doctor_cmd(
         raise typer.Exit(code=1)
 
     typer.echo("Doctor check passed.")
+
+
+@hub_app.command("export")
+def hub_export_cmd(
+    out: Path = typer.Option(..., "--out", help="Output directory for generated hub page."),
+    root: Path = typer.Option(Path("."), "--root", help="Project root containing hub.yaml."),
+    verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
+) -> None:
+    _configure_logging(verbose)
+    output_file = export_hub_directory(root=root, out_dir=out)
+    typer.echo(f"Hub export created at {output_file}")
 
 
 def main() -> None:

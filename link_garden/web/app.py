@@ -12,11 +12,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from link_garden.bookmarks import BookmarkRecord, find_records_by_url, load_record_by_id, persist_record
+from link_garden.config import load_config
 from link_garden.enrich import apply_enrichment_to_bookmark, fetch_url_metadata
 from link_garden.index import find_duplicate_entries, load_index, search_entries
 from link_garden.model import Bookmark, IndexEntry
 from link_garden.storage import init_storage, read_bookmark_file, relative_to_root, write_bookmark
-from link_garden.utils import generate_short_id, normalize_folder_path, normalize_url, split_tags, utc_now_iso
+from link_garden.utils import generate_short_id, normalize_folder_path, split_tags, utc_now_iso
 from link_garden.web.theme import compile_theme, resolve_theme_file
 
 
@@ -123,6 +124,7 @@ def create_app(
     capture_enrich: bool = False,
 ) -> FastAPI:
     paths = init_storage(repo_dir, data_dir=data_dir)
+    app_config, _ = load_config(Path(repo_dir).resolve())
     module_dir = Path(__file__).resolve().parent
     static_dir = module_dir / "static"
     templates = Jinja2Templates(directory=str(module_dir / "templates"))
@@ -370,6 +372,7 @@ def create_app(
             source_meta="",
             canonical_url=None,
             body=note_text,
+            visibility=app_config.default_visibility,
         )
         created_path = write_bookmark(paths, bookmark)
         rel_path = relative_to_root(paths, created_path)

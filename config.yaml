@@ -1,0 +1,5 @@
+default_visibility: private
+export_default_scope: public
+serve_default_scope: public
+server_bind_host: 127.0.0.1
+require_allow_remote: true

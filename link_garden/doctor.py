@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+import stat
 from dataclasses import dataclass, field
-from pathlib import Path
 
+from link_garden.config import load_config
 from link_garden.index import find_duplicate_entries, load_index, rebuild_index_with_report
+from link_garden.security import ExportScope, Visibility, is_local_host
 from link_garden.storage import StoragePaths, list_bookmark_files, read_bookmark_file, relative_to_root
 from link_garden.utils import normalize_url
 
@@ -28,6 +31,8 @@ class DoctorReport:
 
 def run_doctor(paths: StoragePaths) -> DoctorReport:
     report = DoctorReport()
+    _check_configuration(paths, report)
+    _check_data_permissions(paths, report)
 
     try:
         entries = load_index(paths)
@@ -84,9 +89,144 @@ def run_doctor(paths: StoragePaths) -> DoctorReport:
         ids = ", ".join(item.id for item in grouped)
         report.issues.append(DoctorIssue(code="duplicate_url_group", message=f"Duplicate URL group ({normalized}) ids={ids}"))
 
+    _check_export_for_private_entries(paths, report)
+
     return report
 
 
 def doctor_fix(paths: StoragePaths) -> tuple[int, int]:
     report = rebuild_index_with_report(paths, dry_run=False)
     return report.indexed, report.skipped
+
+
+def _check_configuration(paths: StoragePaths, report: DoctorReport) -> None:
+    config, warnings = load_config(paths.root)
+    for warning in warnings:
+        report.issues.append(
+            DoctorIssue(
+                code="config_warning",
+                message=f"{warning} Fix config.yaml and rerun doctor.",
+                path="config.yaml",
+            )
+        )
+
+    if config.default_visibility != Visibility.private:
+        report.issues.append(
+            DoctorIssue(
+                code="insecure_default_visibility",
+                message="default_visibility is not private. Set default_visibility: private in config.yaml.",
+                path="config.yaml",
+            )
+        )
+    if config.export_default_scope != ExportScope.public:
+        report.issues.append(
+            DoctorIssue(
+                code="insecure_export_scope",
+                message="export_default_scope should be public to avoid accidental leaks.",
+                path="config.yaml",
+            )
+        )
+    if config.serve_default_scope != ExportScope.public:
+        report.issues.append(
+            DoctorIssue(
+                code="insecure_serve_scope",
+                message="serve_default_scope should be public. Use explicit flags for broader scopes.",
+                path="config.yaml",
+            )
+        )
+    if not is_local_host(config.server_bind_host):
+        report.issues.append(
+            DoctorIssue(
+                code="public_bind_config",
+                message="server_bind_host is not localhost. Use 127.0.0.1 unless you explicitly proxy it behind auth.",
+                path="config.yaml",
+            )
+        )
+    if not config.require_allow_remote:
+        report.issues.append(
+            DoctorIssue(
+                code="allow_remote_not_required",
+                message="require_allow_remote is false. Set require_allow_remote: true to prevent accidental exposure.",
+                path="config.yaml",
+            )
+        )
+
+
+def _check_data_permissions(paths: StoragePaths, report: DoctorReport) -> None:
+    if not paths.data_dir.exists():
+        return
+
+    if os.name == "posix":
+        mode = stat.S_IMODE(paths.data_dir.stat().st_mode)
+        if mode & stat.S_IRWXO:
+            report.issues.append(
+                DoctorIssue(
+                    code="data_dir_permissions",
+                    message=(
+                        f"data directory permissions are too open ({oct(mode)}). "
+                        "Recommended: chmod 700 data (and chmod 600 on sensitive files)."
+                    ),
+                    path=relative_to_root(paths, paths.data_dir),
+                )
+            )
+        return
+
+    # Best-effort check on non-posix systems.
+    if not os.access(paths.data_dir, os.R_OK | os.W_OK):
+        report.issues.append(
+            DoctorIssue(
+                code="data_dir_access",
+                message="Current user cannot read/write the data directory. Check filesystem ACLs.",
+                path=relative_to_root(paths, paths.data_dir),
+            )
+        )
+
+
+def _check_export_for_private_entries(paths: StoragePaths, report: DoctorReport) -> None:
+    private_urls: dict[str, str] = {}
+    for bookmark_file in list_bookmark_files(paths):
+        try:
+            bookmark = read_bookmark_file(bookmark_file)
+        except Exception:  # noqa: BLE001
+            continue
+        if bookmark.visibility == Visibility.private:
+            private_urls[bookmark.url] = bookmark.id
+
+    if not private_urls:
+        return
+
+    html_files = [
+        path
+        for path in paths.root.rglob("*.html")
+        if ".git" not in path.parts
+        and ".pytest_cache" not in path.parts
+        and "__pycache__" not in path.parts
+        and path.parts[-3:] != ("link_garden", "web", "templates")
+    ]
+
+    for html_file in sorted(html_files):
+        try:
+            html = html_file.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            report.issues.append(
+                DoctorIssue(
+                    code="export_read_error",
+                    message=f"Failed to inspect exported HTML: {exc}",
+                    path=relative_to_root(paths, html_file),
+                )
+            )
+            continue
+
+        for private_url, bookmark_id in private_urls.items():
+            if private_url and private_url in html:
+                report.issues.append(
+                    DoctorIssue(
+                        code="private_export_leak",
+                        message=(
+                            f"Private bookmark {bookmark_id} appears in exported HTML. "
+                            "Re-export with --scope public."
+                        ),
+                        path=relative_to_root(paths, html_file),
+                    )
+                )
+                break

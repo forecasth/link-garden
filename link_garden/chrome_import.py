@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from link_garden.index import build_lookup_maps, entry_from_bookmark, load_index, save_index, upsert_entry
 from link_garden.model import Bookmark, IndexEntry
+from link_garden.security import Visibility
 from link_garden.storage import StoragePaths, read_bookmark_file, relative_to_root, write_bookmark
 from link_garden.utils import chrome_micros_to_iso, generate_short_id, normalize_folder_path, normalize_url, utc_now_iso
 
@@ -117,6 +118,7 @@ def import_chrome_bookmarks(
     dedupe: DedupeMode = DedupeMode.both,
     dry_run: bool = False,
     profile_name: str = "Default",
+    default_visibility: Visibility = Visibility.private,
 ) -> ImportStats:
     records = parse_chrome_bookmarks(bookmarks_file)
     entries = load_index(paths)
@@ -171,6 +173,7 @@ def import_chrome_bookmarks(
             notes="",
             archived=False,
             body="",
+            visibility=default_visibility,
         )
         logger.info("import_create id=%s url=%s", bookmark.id, bookmark.url)
         if dry_run:
@@ -220,6 +223,7 @@ def watch_import_loop(
     interval_seconds: int,
     dry_run: bool,
     profile_name: str,
+    default_visibility: Visibility = Visibility.private,
 ) -> None:
     last_snapshot: FileSnapshot | None = None
     logger.info(
@@ -241,6 +245,7 @@ def watch_import_loop(
                     dedupe=dedupe,
                     dry_run=dry_run,
                     profile_name=profile_name,
+                    default_visibility=default_visibility,
                 )
                 logger.info(
                     "watch_cycle status=imported total=%d created=%d updated=%d skipped=%d",

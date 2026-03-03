@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from link_garden.security import Visibility
+
 
 class Bookmark(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -21,6 +23,7 @@ class Bookmark(BaseModel):
     source_meta: str = ""
     canonical_url: str | None = None
     body: str = ""
+    visibility: Visibility = Visibility.private
 
     def to_frontmatter(self) -> dict[str, object]:
         return {
@@ -38,6 +41,7 @@ class Bookmark(BaseModel):
             "fetched_at": self.fetched_at,
             "source_meta": self.source_meta,
             "canonical_url": self.canonical_url,
+            "visibility": self.visibility.value,
         }
 
 
@@ -55,3 +59,4 @@ class IndexEntry(BaseModel):
     archived: bool = False
     description: str = ""
     search_text: str = ""
+    visibility: Visibility = Visibility.private

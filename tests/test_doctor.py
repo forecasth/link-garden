@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from link_garden.doctor import run_doctor
-from link_garden.index import entry_from_bookmark, load_index, save_index
+from link_garden.index import entry_from_bookmark, save_index
 from link_garden.model import Bookmark, IndexEntry
 from link_garden.storage import init_storage, write_bookmark
 

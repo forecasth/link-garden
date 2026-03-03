@@ -15,6 +15,15 @@ The MVP stores each bookmark as Markdown with YAML frontmatter so data is:
 2. Bookmark is persisted as one Markdown file under `data/bookmarks/`.
 3. `data/index.json` is updated with a compact row for fast list/filter commands.
 4. `doctor --rebuild-index` can reconstruct index from files if the index is stale or corrupted.
+5. Export/serve always apply visibility scope filters (`public`, `unlisted`, `all`).
+
+## Visibility model
+
+- `private`: default, local-only.
+- `unlisted`: opt-in export scope for semi-private sharing.
+- `public`: safe for public export.
+
+Config defaults live in repo-level `config.yaml`.
 
 ## Import behavior
 
@@ -23,3 +32,4 @@ Chrome import parses the local `Bookmarks` JSON recursively and turns URL nodes 
 - `by_guid`: strongest dedupe when Chrome GUID exists.
 - `by_url`: fallback for migrated or missing GUIDs.
 - `both`: robust default (guid first, normalized URL second).
+- New imports use `default_visibility` from `config.yaml` (default: `private`).
