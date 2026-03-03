@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from link_garden.io_utils import atomic_write_text
 from link_garden.model import Bookmark
 from link_garden.security import Visibility
 from link_garden.utils import build_bookmark_filename, ensure_utc_iso, split_tags
@@ -40,7 +41,7 @@ def init_storage(root: Path | str | None = None, data_dir: Path | str | None = N
     paths = resolve_paths(root, data_dir=data_dir)
     paths.bookmarks_dir.mkdir(parents=True, exist_ok=True)
     if not paths.index_file.exists():
-        paths.index_file.write_text("[]\n", encoding="utf-8")
+        atomic_write_text(paths.index_file, "[]\n")
     return paths
 
 
@@ -132,7 +133,7 @@ def write_bookmark(paths: StoragePaths, bookmark: Bookmark, existing_path: Path 
                 counter += 1
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_bookmark_to_markdown(bookmark), encoding="utf-8")
+    atomic_write_text(target, _bookmark_to_markdown(bookmark))
     return target
 
 
@@ -146,4 +147,4 @@ def load_all_bookmarks(paths: StoragePaths) -> list[tuple[Bookmark, Path]]:
 def ensure_index_file(paths: StoragePaths) -> None:
     if not paths.index_file.exists():
         paths.index_file.parent.mkdir(parents=True, exist_ok=True)
-        paths.index_file.write_text(json.dumps([], indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(paths.index_file, json.dumps([], indent=2) + "\n")

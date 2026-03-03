@@ -45,8 +45,9 @@ By default, serving is local-only (`127.0.0.1`) and public-scope. For self-hosti
   - export scope defaults to `public`
   - serve binds to `127.0.0.1`
   - remote bind requires explicit `--allow-remote`
-  - `scope=all` requires explicit `--dangerous-all`
+- `scope=all` requires explicit `--dangerous-all`
 - `doctor` checks for common security footguns, including private URLs leaking into exported HTML.
+- High-impact mutating workflows auto-create a backup in `data/backups/` by default (`import-chrome`, `rebuild-index`, `doctor --fix`).
 
 See [SECURITY.md](SECURITY.md) for guarantees, non-goals, deployment patterns, and reporting.
 
@@ -90,17 +91,20 @@ Missing config falls back to secure defaults.
 ```bash
 link-garden init <dir>
 link-garden add --url <url> [--title <title>] [--tags t1,t2] [--notes "..."] [--folder "path"]
-link-garden import-chrome --bookmarks-file <path> [--profile-name Default] [--dedupe by_url|by_guid|both] [--dry-run] [--watch]
-link-garden list [--search <text>] [--tag <tag>] [--folder <path>] [--visibility private|unlisted|public] [--limit N]
+link-garden import-chrome --bookmarks-file <path> [--profile-name Default] [--dedupe by_url|by_guid|both] [--dry-run] [--backup-before] [--watch]
+link-garden list [--search <text>] [--tag <tag>] [--folder <path>] [--visibility private|unlisted|public] [--limit N] [--format table|tsv|json]
 link-garden set-visibility --id <id> --visibility private|unlisted|public
+link-garden set-visibility --url <url> --visibility private|unlisted|public [--yes]
 link-garden export --format markdown|json|html --out <dir> [--scope public|unlisted|all] [--dangerous-all]
 link-garden serve [--host 127.0.0.1] [--port 8000] [--export-mode public|unlisted|all] [--dangerous-all] [--allow-remote]
-link-garden doctor [--rebuild-index] [--fix]
-link-garden rebuild-index [--dry-run]
+link-garden doctor [--rebuild-index] [--fix] [--backup-before]
+link-garden rebuild-index [--dry-run] [--yes] [--backup-before]
 link-garden duplicates [--include-archived]
 link-garden backup --out <dir> [--format zip|tar|copy]
 link-garden hub export --out <dir>
 ```
+
+`rebuild-index` is now non-destructive when parse errors are found: it writes `data/index.rebuild.json` and leaves `data/index.json` unchanged unless `--yes` is provided.
 
 ## Hub
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+from link_garden.io_utils import atomic_write_text
 from link_garden.model import Bookmark, IndexEntry
 from link_garden.security import Visibility
 from link_garden.storage import (
@@ -44,10 +45,14 @@ def load_index(paths: StoragePaths) -> list[IndexEntry]:
 
 
 def save_index(paths: StoragePaths, entries: list[IndexEntry]) -> None:
+    save_index_file(paths.index_file, entries)
+
+
+def save_index_file(index_file: Path, entries: list[IndexEntry]) -> None:
     ordered = sorted(entries, key=lambda item: item.saved_at, reverse=True)
     payload = [entry.model_dump(mode="json") for entry in ordered]
-    paths.index_file.parent.mkdir(parents=True, exist_ok=True)
-    paths.index_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(index_file, json.dumps(payload, indent=2) + "\n")
 
 
 def entry_from_bookmark(bookmark: Bookmark, rel_path: str) -> IndexEntry:

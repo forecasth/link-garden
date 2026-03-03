@@ -102,6 +102,20 @@ def test_doctor_flags_private_export_leak(tmp_path: Path) -> None:
     assert "private_export_leak" in issue_codes
 
 
+def test_doctor_ignores_private_url_in_non_export_html(tmp_path: Path) -> None:
+    paths = init_storage(tmp_path)
+    private_url = "https://private.example.com/secret"
+    write_bookmark(paths, _bookmark("private01", Visibility.private, private_url))
+
+    site_dir = tmp_path / "site"
+    site_dir.mkdir(parents=True, exist_ok=True)
+    (site_dir / "index.html").write_text(f"<html><body>{private_url}</body></html>", encoding="utf-8")
+
+    report = run_doctor(paths)
+    issue_codes = {issue.code for issue in report.issues}
+    assert "private_export_leak" not in issue_codes
+
+
 def test_config_secure_defaults_when_missing(tmp_path: Path) -> None:
     root = tmp_path / "project-root"
     root.mkdir()

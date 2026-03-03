@@ -3,12 +3,15 @@ from __future__ import annotations
 import os
 import stat
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from link_garden.config import load_config
 from link_garden.index import find_duplicate_entries, load_index, rebuild_index_with_report
 from link_garden.security import ExportScope, Visibility, is_local_host
 from link_garden.storage import StoragePaths, list_bookmark_files, read_bookmark_file, relative_to_root
 from link_garden.utils import normalize_url
+
+EXPORT_SCAN_DIRS = ("exports", "export")
 
 
 @dataclass
@@ -195,14 +198,12 @@ def _check_export_for_private_entries(paths: StoragePaths, report: DoctorReport)
     if not private_urls:
         return
 
-    html_files = [
-        path
-        for path in paths.root.rglob("*.html")
-        if ".git" not in path.parts
-        and ".pytest_cache" not in path.parts
-        and "__pycache__" not in path.parts
-        and path.parts[-3:] != ("link_garden", "web", "templates")
-    ]
+    html_files: list[Path] = []
+    for folder_name in EXPORT_SCAN_DIRS:
+        export_dir = (paths.root / folder_name).resolve()
+        if not export_dir.exists() or not export_dir.is_dir():
+            continue
+        html_files.extend(sorted(export_dir.rglob("*.html")))
 
     for html_file in sorted(html_files):
         try:

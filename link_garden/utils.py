@@ -15,6 +15,7 @@ MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")
 MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s*", re.MULTILINE)
 MARKDOWN_PUNCT_RE = re.compile(r"[*_~>#-]+")
 WHITESPACE_RE = re.compile(r"\s+")
+URI_SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 
 def utc_now_iso() -> str:
@@ -115,10 +116,18 @@ def normalize_search_text(text: str) -> str:
 
 def normalize_url(url: str) -> str:
     stripped = url.strip()
+    if not stripped:
+        return ""
+    candidate = stripped
+    if candidate.startswith("//"):
+        candidate = "https:" + candidate
+    elif not URI_SCHEME_RE.match(candidate):
+        candidate = "https://" + candidate.lstrip("/")
+
     try:
-        parsed = urlsplit(stripped)
+        parsed = urlsplit(candidate)
     except ValueError:
-        return stripped
+        return candidate
 
     scheme = (parsed.scheme or "https").lower()
     netloc = parsed.netloc.lower()

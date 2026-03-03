@@ -137,19 +137,36 @@ def import_chrome_bookmarks(
     for record in records:
         existing = _find_existing(record, dedupe=dedupe, by_guid=by_guid, by_url=by_url)
         if existing:
+            existing_path = (paths.root / existing.path).resolve()
+            if not existing_path.exists():
+                stats.skipped += 1
+                logger.warning("import_skip_missing id=%s path=%s", existing.id, existing.path)
+                continue
+            bookmark = read_bookmark_file(existing_path)
+            next_title = record.title or bookmark.title
+            next_guid = record.guid or bookmark.chrome_guid
+            changed = (
+                bookmark.title != next_title
+                or bookmark.url != record.url
+                or bookmark.source != "chrome"
+                or bookmark.folder_path != record.folder_path
+                or bookmark.chrome_guid != next_guid
+            )
+            if not changed:
+                stats.skipped += 1
+                logger.info("import_skip_no_change id=%s url=%s", existing.id, record.url)
+                continue
+
             stats.updated += 1
             logger.info("import_update id=%s url=%s", existing.id, record.url)
             if dry_run:
                 continue
 
-            existing_path = (paths.root / existing.path).resolve()
-            bookmark = read_bookmark_file(existing_path)
-            bookmark.title = record.title or bookmark.title
+            bookmark.title = next_title
             bookmark.url = record.url
             bookmark.source = "chrome"
             bookmark.folder_path = record.folder_path
-            if record.guid:
-                bookmark.chrome_guid = record.guid
+            bookmark.chrome_guid = next_guid
             write_bookmark(paths, bookmark, existing_path=existing_path)
 
             updated_entry = entry_from_bookmark(bookmark, existing.path)

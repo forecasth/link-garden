@@ -11,10 +11,18 @@ def test_build_bookmark_filename_is_sanitized_and_deterministic() -> None:
     assert all(char not in filename for char in '<>:"/\\|?*')
 
 
-def test_normalize_url_removes_utm_trailing_slash_and_fragment() -> None:
+def test_normalize_url_bare_host_defaults_to_https() -> None:
+    assert normalize_url("example.com") == "https://example.com"
+
+
+def test_normalize_url_removes_utm_and_orders_query_parameters() -> None:
     raw = "HTTPS://Example.COM/Path/?utm_source=x&a=2&b=1&utm_medium=y#frag"
     normalized = normalize_url(raw)
     assert normalized == "https://example.com/Path?a=2&b=1"
+
+
+def test_normalize_url_removes_trailing_slash() -> None:
+    assert normalize_url("https://example.com/path/") == "https://example.com/path"
 
 
 def test_normalize_url_drops_default_https_port() -> None:

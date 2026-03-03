@@ -88,7 +88,8 @@ def test_import_chrome_is_idempotent_with_both_dedupe(tmp_path: Path) -> None:
     assert first.created == 1
     assert first.updated == 0
     assert second.created == 0
-    assert second.updated == 1
+    assert second.updated == 0
+    assert second.skipped == 1
     assert len(load_index(paths)) == 1
     assert len(list_bookmark_files(paths)) == 1
 

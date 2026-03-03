@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import http.server
+import json
 import logging
 import os
 import shutil
@@ -9,7 +10,9 @@ import sys
 import tempfile
 import threading
 import webbrowser
+from enum import Enum
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlsplit
 
 import typer
@@ -28,18 +31,25 @@ from link_garden.index import (
     load_index,
     rebuild_index_with_report,
     save_index,
+    save_index_file,
     search_entries,
     upsert_entry,
 )
-from link_garden.model import Bookmark
+from link_garden.model import Bookmark, IndexEntry
 from link_garden.security import ExportScope, Visibility, is_local_host, scope_is_broader_than_public
-from link_garden.storage import init_storage, read_bookmark_file, relative_to_root, write_bookmark
+from link_garden.storage import StoragePaths, init_storage, read_bookmark_file, relative_to_root, write_bookmark
 from link_garden.utils import generate_short_id, normalize_folder_path, split_tags, utc_now_iso
 
 logger = logging.getLogger(__name__)
 app = typer.Typer(help="Local-first bookmark + notes knowledge garden.")
 hub_app = typer.Typer(help="Hub directory tools.")
 app.add_typer(hub_app, name="hub")
+
+
+class ListOutputFormat(str, Enum):
+    table = "table"
+    tsv = "tsv"
+    json = "json"
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -54,6 +64,14 @@ def _resolve_paths(repo_dir: Path, data_dir: Path | None) -> tuple[Path, Path | 
 def _looks_like_url(value: str) -> bool:
     parsed = urlsplit(value.strip())
     return bool(parsed.scheme and parsed.netloc)
+
+
+def _clip(value: str, width: int) -> str:
+    if len(value) <= width:
+        return value
+    if width <= 3:
+        return value[:width]
+    return value[: width - 3] + "..."
 
 
 def _editor_command_for_platform(file_path: Path, editor_override: str | None = None) -> tuple[list[str] | str, bool]:
@@ -104,6 +122,31 @@ def _warn_if_non_public_scope(scope: ExportScope, *, context: str) -> None:
             fg=typer.colors.YELLOW,
             err=True,
         )
+
+
+def _run_cli_safe(operation: Callable[[], None]) -> None:
+    try:
+        operation()
+    except (ValueError, FileNotFoundError) as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _serialize_entries(entries: list[IndexEntry]) -> list[dict[str, object]]:
+    serialized = [entry.model_dump(mode="json") for entry in entries]
+    return sorted(serialized, key=lambda item: str(item.get("id", "")))
+
+
+def _entries_will_change(existing_entries: list[IndexEntry], rebuilt_entries: list[IndexEntry]) -> bool:
+    return _serialize_entries(existing_entries) != _serialize_entries(rebuilt_entries)
+
+
+def _create_auto_backup(paths: StoragePaths, *, reason: str) -> Path:
+    backup_dir = paths.data_dir / "backups"
+    report = create_backup(paths=paths, out_dir=backup_dir, backup_format=BackupFormat.zip, include_index=True)
+    typer.echo(f"Auto backup ({reason}): {report.output_path}")
+    typer.echo(f"Restore hint: extract {report.output_path.name} into the project root and rerun `link-garden doctor`.")
+    return report.output_path
 
 
 def _serve_directory(directory: Path, host: str, port: int, open_browser: bool) -> None:
@@ -193,6 +236,11 @@ def import_chrome_cmd(
     profile_name: str = typer.Option("Default", "--profile-name", help="Chrome profile label (for logs)."),
     dedupe: DedupeMode = typer.Option(DedupeMode.both, "--dedupe", help="Deduplication strategy."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print changes without writing."),
+    backup_before: bool = typer.Option(
+        True,
+        "--backup-before/--no-backup-before",
+        help="Create a backup in data/backups before applying import changes.",
+    ),
     watch: bool = typer.Option(False, "--watch", help="Continuously poll the Bookmarks file and import on change."),
     interval: int = typer.Option(60, "--interval", min=1, help="Watch poll interval in seconds."),
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
@@ -202,6 +250,8 @@ def import_chrome_cmd(
     paths = init_storage(root)
     config = _load_app_config(paths.root)
     if watch:
+        if backup_before and not dry_run:
+            typer.secho("Watch mode skips auto-backups. Use `link-garden backup` periodically.", fg=typer.colors.YELLOW)
         typer.echo(f"Watching {bookmarks_file} every {interval}s (dedupe={dedupe.value}, dry_run={dry_run}). Press Ctrl+C to stop.")
         try:
             watch_import_loop(
@@ -217,14 +267,38 @@ def import_chrome_cmd(
             typer.echo("Watch stopped.")
         return
 
-    stats = import_chrome_bookmarks(
-        paths=paths,
-        bookmarks_file=bookmarks_file,
-        dedupe=dedupe,
-        dry_run=dry_run,
-        profile_name=profile_name,
-        default_visibility=config.default_visibility,
-    )
+    if dry_run:
+        stats = import_chrome_bookmarks(
+            paths=paths,
+            bookmarks_file=bookmarks_file,
+            dedupe=dedupe,
+            dry_run=True,
+            profile_name=profile_name,
+            default_visibility=config.default_visibility,
+        )
+    else:
+        preview = import_chrome_bookmarks(
+            paths=paths,
+            bookmarks_file=bookmarks_file,
+            dedupe=dedupe,
+            dry_run=True,
+            profile_name=profile_name,
+            default_visibility=config.default_visibility,
+        )
+        pending_mutations = preview.created + preview.updated
+        if pending_mutations > 0 and backup_before:
+            _create_auto_backup(paths, reason="before import-chrome")
+        if pending_mutations == 0:
+            stats = preview
+        else:
+            stats = import_chrome_bookmarks(
+                paths=paths,
+                bookmarks_file=bookmarks_file,
+                dedupe=dedupe,
+                dry_run=False,
+                profile_name=profile_name,
+                default_visibility=config.default_visibility,
+            )
 
     mode_label = "DRY RUN " if dry_run else ""
     typer.echo(f"{mode_label}Import complete: total={stats.total} created={stats.created} updated={stats.updated} skipped={stats.skipped}")
@@ -239,6 +313,7 @@ def list_cmd(
     include_archived: bool = typer.Option(False, "--include-archived", help="Include archived bookmarks."),
     recent: int | None = typer.Option(None, "--recent", min=1, help="Shortcut for most recent N bookmarks."),
     limit: int = typer.Option(50, "--limit", min=1, help="Maximum rows to print."),
+    format: ListOutputFormat = typer.Option(ListOutputFormat.table, "--format", help="Output format."),
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
@@ -256,15 +331,27 @@ def list_cmd(
     )
     effective_limit = recent if recent is not None else limit
     filtered = filtered[:effective_limit]
+    if format == ListOutputFormat.json:
+        payload = [entry.model_dump(mode="json") for entry in filtered]
+        typer.echo(json.dumps(payload, indent=2))
+        return
     if not filtered:
         typer.echo("No bookmarks found.")
         return
 
+    if format == ListOutputFormat.tsv:
+        typer.echo("id\ttitle\tfolder\tvisibility")
+        for entry in filtered:
+            typer.echo(f"{entry.id}\t{entry.title}\t{entry.folder_path or '-'}\t{entry.visibility.value}")
+        return
+
+    header = f"{'ID':<12} {'TITLE':<48} {'FOLDER':<28} {'VISIBILITY':<10}"
+    typer.echo(header)
+    typer.echo("-" * len(header))
     for entry in filtered:
-        tag_text = ",".join(entry.tags) if entry.tags else "-"
-        folder_text = entry.folder_path or "-"
-        archived_label = "archived" if entry.archived else "active"
-        typer.echo(f"{entry.saved_at}\t{entry.title}\t{entry.url}\t{entry.visibility.value}\t{tag_text}\t{folder_text}\t{archived_label}")
+        typer.echo(
+            f"{_clip(entry.id, 12):<12} {_clip(entry.title, 48):<48} {_clip(entry.folder_path or '-', 28):<28} {entry.visibility.value:<10}"
+        )
 
 
 @app.command("duplicates")
@@ -304,20 +391,23 @@ def edit_cmd(
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
-    paths = init_storage(repo_dir, data_dir=data_dir)
-    record = resolve_record(paths, id_or_path)
-    _run_editor(record.path, editor_override=editor)
+    def _execute() -> None:
+        paths = init_storage(repo_dir, data_dir=data_dir)
+        record = resolve_record(paths, id_or_path)
+        _run_editor(record.path, editor_override=editor)
 
-    bookmark = read_bookmark_file(record.path)
-    synced = persist_record(
-        paths,
-        BookmarkRecord(bookmark=bookmark, path=record.path, rel_path=record.rel_path, entry=record.entry),
-        rename_file=False,
-    )
-    tags_text = ",".join(synced.bookmark.tags) if synced.bookmark.tags else "-"
-    typer.echo(
-        f"Updated {synced.bookmark.id}: title={synced.bookmark.title!r} tags={tags_text} archived={synced.bookmark.archived}"
-    )
+        bookmark = read_bookmark_file(record.path)
+        synced = persist_record(
+            paths,
+            BookmarkRecord(bookmark=bookmark, path=record.path, rel_path=record.rel_path, entry=record.entry),
+            rename_file=False,
+        )
+        tags_text = ",".join(synced.bookmark.tags) if synced.bookmark.tags else "-"
+        typer.echo(
+            f"Updated {synced.bookmark.id}: title={synced.bookmark.title!r} tags={tags_text} archived={synced.bookmark.archived}"
+        )
+
+    _run_cli_safe(_execute)
 
 
 @app.command("tag")
@@ -334,21 +424,24 @@ def tag_cmd(
     if not (add.strip() or remove.strip() or set_tags.strip()):
         raise typer.BadParameter("Provide at least one of --add, --remove, or --set")
 
-    paths = init_storage(repo_dir, data_dir=data_dir)
-    record = load_record_by_id(paths, bookmark_id)
+    def _execute() -> None:
+        paths = init_storage(repo_dir, data_dir=data_dir)
+        record = load_record_by_id(paths, bookmark_id)
 
-    tags = record.bookmark.tags
-    if set_tags.strip():
-        tags = split_tags(set_tags)
-    if add.strip():
-        tags = _merge_tags(tags, split_tags(add))
-    if remove.strip():
-        remove_set = {item.lower() for item in split_tags(remove)}
-        tags = [item for item in tags if item.lower() not in remove_set]
+        tags = record.bookmark.tags
+        if set_tags.strip():
+            tags = split_tags(set_tags)
+        if add.strip():
+            tags = _merge_tags(tags, split_tags(add))
+        if remove.strip():
+            remove_set = {item.lower() for item in split_tags(remove)}
+            tags = [item for item in tags if item.lower() not in remove_set]
 
-    record.bookmark.tags = tags
-    synced = persist_record(paths, record, rename_file=False)
-    typer.echo(f"Updated tags for {synced.bookmark.id}: {','.join(synced.bookmark.tags) if synced.bookmark.tags else '-'}")
+        record.bookmark.tags = tags
+        synced = persist_record(paths, record, rename_file=False)
+        typer.echo(f"Updated tags for {synced.bookmark.id}: {','.join(synced.bookmark.tags) if synced.bookmark.tags else '-'}")
+
+    _run_cli_safe(_execute)
 
 
 @app.command("set-visibility")
@@ -356,6 +449,7 @@ def set_visibility_cmd(
     id: str | None = typer.Option(None, "--id", help="Bookmark id."),
     url: str | None = typer.Option(None, "--url", help="Bookmark URL (updates all normalized URL matches)."),
     visibility: Visibility = typer.Option(..., "--visibility", help="Visibility to apply."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm broad URL-based updates."),
     repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
@@ -364,22 +458,34 @@ def set_visibility_cmd(
     if bool(id) == bool(url):
         raise typer.BadParameter("Provide exactly one of --id or --url")
 
-    paths = init_storage(repo_dir, data_dir=data_dir)
-    records: list[BookmarkRecord]
-    if id:
-        records = [load_record_by_id(paths, id)]
-    else:
-        assert url is not None
-        records = find_records_by_url(paths, url, include_archived=True)
-        if not records:
-            raise typer.BadParameter(f"No bookmarks matched URL: {url}")
+    def _execute() -> None:
+        paths = init_storage(repo_dir, data_dir=data_dir)
+        records: list[BookmarkRecord]
+        if id:
+            records = [load_record_by_id(paths, id)]
+        else:
+            assert url is not None
+            records = find_records_by_url(paths, url, include_archived=True)
+            if not records:
+                raise typer.BadParameter(f"No bookmarks matched URL: {url}")
+            if len(records) > 1 and not yes:
+                typer.secho(f"Matched {len(records)} bookmarks for URL={url}.", fg=typer.colors.YELLOW, err=True)
+                typer.echo("Preview:", err=True)
+                for record in records[:5]:
+                    typer.echo(f"- {record.bookmark.id}\t{record.bookmark.title}\t{record.rel_path}", err=True)
+                if len(records) > 5:
+                    typer.echo(f"- ... and {len(records) - 5} more", err=True)
+                typer.secho("Re-run with --yes to apply changes to all matches.", fg=typer.colors.YELLOW, err=True)
+                raise typer.Exit(code=1)
 
-    for record in records:
-        record.bookmark.visibility = visibility
-        persist_record(paths, record, rename_file=False)
+        for record in records:
+            record.bookmark.visibility = visibility
+            persist_record(paths, record, rename_file=False)
 
-    target_label = f"id={id}" if id else f"url={url}"
-    typer.echo(f"Updated visibility for {len(records)} bookmark(s) ({target_label}) -> {visibility.value}")
+        target_label = f"id={id}" if id else f"url={url}"
+        typer.echo(f"Updated visibility for {len(records)} bookmark(s) ({target_label}) -> {visibility.value}")
+
+    _run_cli_safe(_execute)
 
 
 @app.command("archive")
@@ -394,11 +500,14 @@ def archive_cmd(
     if not yes and not typer.confirm(f"Archive bookmark {bookmark_id}?"):
         raise typer.Abort()
 
-    paths = init_storage(repo_dir, data_dir=data_dir)
-    record = load_record_by_id(paths, bookmark_id)
-    record.bookmark.archived = True
-    persist_record(paths, record, rename_file=False)
-    typer.echo(f"Archived {bookmark_id}")
+    def _execute() -> None:
+        paths = init_storage(repo_dir, data_dir=data_dir)
+        record = load_record_by_id(paths, bookmark_id)
+        record.bookmark.archived = True
+        persist_record(paths, record, rename_file=False)
+        typer.echo(f"Archived {bookmark_id}")
+
+    _run_cli_safe(_execute)
 
 
 @app.command("unarchive")
@@ -409,11 +518,14 @@ def unarchive_cmd(
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
-    paths = init_storage(repo_dir, data_dir=data_dir)
-    record = load_record_by_id(paths, bookmark_id)
-    record.bookmark.archived = False
-    persist_record(paths, record, rename_file=False)
-    typer.echo(f"Unarchived {bookmark_id}")
+    def _execute() -> None:
+        paths = init_storage(repo_dir, data_dir=data_dir)
+        record = load_record_by_id(paths, bookmark_id)
+        record.bookmark.archived = False
+        persist_record(paths, record, rename_file=False)
+        typer.echo(f"Unarchived {bookmark_id}")
+
+    _run_cli_safe(_execute)
 
 
 @app.command("move")
@@ -426,11 +538,14 @@ def move_cmd(
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
-    paths = init_storage(repo_dir, data_dir=data_dir)
-    record = load_record_by_id(paths, bookmark_id)
-    record.bookmark.folder_path = normalize_folder_path(folder)
-    synced = persist_record(paths, record, rename_file=rename_file)
-    typer.echo(f"Moved {bookmark_id} to folder={synced.bookmark.folder_path} file={synced.rel_path}")
+    def _execute() -> None:
+        paths = init_storage(repo_dir, data_dir=data_dir)
+        record = load_record_by_id(paths, bookmark_id)
+        record.bookmark.folder_path = normalize_folder_path(folder)
+        synced = persist_record(paths, record, rename_file=rename_file)
+        typer.echo(f"Moved {bookmark_id} to folder={synced.bookmark.folder_path} file={synced.rel_path}")
+
+    _run_cli_safe(_execute)
 
 
 @app.command("enrich")
@@ -542,12 +657,23 @@ def rebuild_index_cmd(
     repo_dir: Path = typer.Option(Path("."), "--repo-dir", help="Project repository root."),
     data_dir: Path | None = typer.Option(None, "--data-dir", help="Optional data directory override."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Scan and validate without writing index.json."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm overwriting index.json when parse errors are present."),
+    backup_before: bool = typer.Option(
+        True,
+        "--backup-before/--no-backup-before",
+        help="Create a backup in data/backups before replacing index.json.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
     resolved_repo_dir, resolved_data_dir = _resolve_paths(repo_dir, data_dir)
     paths = init_storage(resolved_repo_dir, data_dir=resolved_data_dir)
-    report = rebuild_index_with_report(paths, dry_run=dry_run)
+    report = rebuild_index_with_report(paths, dry_run=True)
+    try:
+        existing_entries = load_index(paths)
+    except Exception:
+        existing_entries = []
+    mutation_pending = _entries_will_change(existing_entries, report.entries)
 
     mode_prefix = "DRY RUN " if dry_run else ""
     typer.echo(
@@ -555,6 +681,27 @@ def rebuild_index_cmd(
     )
     for issue in report.errors:
         typer.echo(f"- {issue.path}: {issue.error}")
+    if dry_run:
+        return
+
+    if report.errors:
+        rebuild_path = paths.data_dir / "index.rebuild.json"
+        save_index_file(rebuild_path, report.entries)
+        typer.echo(f"Wrote rebuilt candidate index to {relative_to_root(paths, rebuild_path)}")
+        if not yes:
+            typer.secho(
+                "Index left unchanged due to parse errors. Re-run with --yes to overwrite data/index.json.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            return
+    if not mutation_pending:
+        typer.echo("Index already up to date. No changes written.")
+        return
+    if backup_before:
+        _create_auto_backup(paths, reason="before rebuild-index")
+    save_index(paths, report.entries)
+    typer.echo("index.json updated.")
 
 
 @app.command("serve")
@@ -622,6 +769,11 @@ def doctor_cmd(
     root: Path = typer.Option(Path("."), "--root", help="Project root directory."),
     rebuild_index: bool = typer.Option(False, "--rebuild-index", help="Rebuild index from Markdown files first."),
     fix: bool = typer.Option(False, "--fix", help="Apply safe fixes (currently: rebuild index)."),
+    backup_before: bool = typer.Option(
+        True,
+        "--backup-before/--no-backup-before",
+        help="Create a backup in data/backups before applying --fix changes.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", help="Enable verbose logging."),
 ) -> None:
     _configure_logging(verbose)
@@ -636,8 +788,19 @@ def doctor_cmd(
             typer.echo(f"- {issue.path}: {issue.error}")
 
     if fix:
-        fixed_indexed, fixed_skipped = doctor_fix(paths)
-        typer.echo(f"Doctor fix applied: rebuilt index (indexed={fixed_indexed}, skipped={fixed_skipped})")
+        preview = rebuild_index_with_report(paths, dry_run=True)
+        try:
+            existing_entries = load_index(paths)
+        except Exception:
+            existing_entries = []
+        mutation_pending = _entries_will_change(existing_entries, preview.entries)
+        if mutation_pending:
+            if backup_before:
+                _create_auto_backup(paths, reason="before doctor --fix")
+            fixed_indexed, fixed_skipped = doctor_fix(paths)
+            typer.echo(f"Doctor fix applied: rebuilt index (indexed={fixed_indexed}, skipped={fixed_skipped})")
+        else:
+            typer.echo("Doctor fix skipped: index already consistent.")
 
     report = run_doctor(paths)
     typer.echo(f"Doctor summary: scanned_files={report.scanned_files} index_entries={report.index_entries} issues={len(report.issues)}")
