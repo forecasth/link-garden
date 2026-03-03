@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from link_garden.index import entry_from_bookmark, load_index, save_index
 from link_garden.model import Bookmark
 from link_garden.storage import init_storage, read_bookmark_file, relative_to_root, write_bookmark
-from link_garden.web.app import create_app
+from link_garden.web.app import MAX_NOTES_LENGTH, MAX_TAGS, create_app
 
 
 def _seed(tmp_path: Path) -> str:
@@ -71,3 +71,32 @@ def test_web_write_endpoints_persist_updates_when_enabled(tmp_path: Path) -> Non
     assert bookmark.body == "updated notes body"
     assert entry.archived is True
     assert entry.tags == ["two", "three"]
+
+
+def test_web_write_notes_reject_over_limit(tmp_path: Path) -> None:
+    bookmark_id = _seed(tmp_path)
+    app = create_app(repo_dir=tmp_path, enable_write=True)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/bookmarks/{bookmark_id}/notes",
+        data={"notes": "n" * (MAX_NOTES_LENGTH + 1)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert "notes exceeds max length" in response.json()["detail"]
+
+
+def test_web_write_tags_reject_over_limit(tmp_path: Path) -> None:
+    bookmark_id = _seed(tmp_path)
+    app = create_app(repo_dir=tmp_path, enable_write=True)
+    client = TestClient(app)
+    tags = ",".join(f"tag{i}" for i in range(MAX_TAGS + 1))
+
+    response = client.post(
+        f"/api/bookmarks/{bookmark_id}/tags",
+        data={"set_tags": tags},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert "max tag count" in response.json()["detail"]

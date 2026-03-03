@@ -26,6 +26,7 @@ ALLOWED_TAGS = {
 }
 VOID_TAGS = {"br", "hr"}
 ALLOWED_LINK_SCHEMES = {"http", "https"}
+BLOCKED_CONTENT_TAGS = {"script", "style", "svg", "foreignobject"}
 
 
 def sanitize_link_url(value: str) -> str | None:
@@ -43,9 +44,15 @@ class _HTMLSanitizer(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
+        self._blocked_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         normalized = tag.lower()
+        if normalized in BLOCKED_CONTENT_TAGS:
+            self._blocked_depth += 1
+            return
+        if self._blocked_depth > 0:
+            return
         if normalized not in ALLOWED_TAGS:
             return
         rendered_attrs: list[str] = []
@@ -69,12 +76,25 @@ class _HTMLSanitizer(HTMLParser):
         attr_text = (" " + " ".join(rendered_attrs)) if rendered_attrs else ""
         self.parts.append(f"<{normalized}{attr_text}>")
 
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+        normalized = tag.lower()
+        if normalized in ALLOWED_TAGS and normalized not in VOID_TAGS:
+            self.handle_endtag(tag)
+
     def handle_endtag(self, tag: str) -> None:
         normalized = tag.lower()
+        if normalized in BLOCKED_CONTENT_TAGS:
+            self._blocked_depth = max(self._blocked_depth - 1, 0)
+            return
+        if self._blocked_depth > 0:
+            return
         if normalized in ALLOWED_TAGS and normalized not in VOID_TAGS:
             self.parts.append(f"</{normalized}>")
 
     def handle_data(self, data: str) -> None:
+        if self._blocked_depth > 0:
+            return
         self.parts.append(escape(data))
 
 
@@ -83,4 +103,3 @@ def sanitize_html(value: str) -> str:
     sanitizer.feed(value)
     sanitizer.close()
     return "".join(sanitizer.parts)
-

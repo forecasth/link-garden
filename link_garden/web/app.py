@@ -35,6 +35,17 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
 }
+CHARSET_MEDIA_PREFIXES = ("text/", "application/json")
+
+WEB_LIST_DEFAULT_LIMIT = 50
+WEB_LIST_MAX_LIMIT = 100
+
+MAX_TITLE_LENGTH = 240
+MAX_URL_LENGTH = 2048
+MAX_NOTES_LENGTH = 20_000
+MAX_FOLDER_PATH_LENGTH = 240
+MAX_TAGS = 25
+MAX_TAG_LENGTH = 64
 
 
 def _entry_domain(url: str) -> str:
@@ -43,6 +54,17 @@ def _entry_domain(url: str) -> str:
 
 def _build_page_url(page: int, per_page: int, search: str, tag: str, folder: str, include_archived: bool) -> str:
     params: dict[str, str | int] = {"page": page, "per_page": per_page, "include_archived": int(include_archived)}
+    if search:
+        params["search"] = search
+    if tag:
+        params["tag"] = tag
+    if folder:
+        params["folder"] = folder
+    return "/?" + urlencode(params)
+
+
+def _build_offset_url(offset: int, limit: int, search: str, tag: str, folder: str, include_archived: bool) -> str:
+    params: dict[str, str | int] = {"offset": offset, "limit": limit, "include_archived": int(include_archived)}
     if search:
         params["search"] = search
     if tag:
@@ -132,6 +154,37 @@ def _write_guard(enable_write: bool, enable_capture: bool, is_capture: bool = Fa
     raise HTTPException(status_code=403, detail="Write endpoints are disabled. Start server with --enable-write.")
 
 
+def _ensure_charset(content_type: str) -> str:
+    if "charset=" in content_type.lower():
+        return content_type
+    if content_type.startswith(CHARSET_MEDIA_PREFIXES):
+        return f"{content_type}; charset=utf-8"
+    return content_type
+
+
+def _require_length(value: str, *, field: str, max_length: int) -> None:
+    if len(value) > max_length:
+        raise HTTPException(status_code=400, detail=f"{field} exceeds max length ({max_length})")
+
+
+def _require_tags(tags: list[str], *, field: str = "tags") -> None:
+    if len(tags) > MAX_TAGS:
+        raise HTTPException(status_code=400, detail=f"{field} exceeds max tag count ({MAX_TAGS})")
+    for item in tags:
+        if len(item) > MAX_TAG_LENGTH:
+            raise HTTPException(status_code=400, detail=f"{field} contains tag exceeding max length ({MAX_TAG_LENGTH})")
+
+
+def _validate_capture_inputs(*, title: str, url: str, tags: str, notes: str, folder: str) -> list[str]:
+    _require_length(title.strip(), field="title", max_length=MAX_TITLE_LENGTH)
+    _require_length(url.strip(), field="url", max_length=MAX_URL_LENGTH)
+    _require_length(notes.strip(), field="notes", max_length=MAX_NOTES_LENGTH)
+    _require_length(folder.strip(), field="folder_path", max_length=MAX_FOLDER_PATH_LENGTH)
+    parsed_tags = split_tags(tags)
+    _require_tags(parsed_tags)
+    return parsed_tags
+
+
 def create_app(
     repo_dir: Path,
     data_dir: Path | None = None,
@@ -157,6 +210,9 @@ def create_app(
         response = await call_next(request)
         for key, value in SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)
+        content_type = response.headers.get("content-type")
+        if content_type:
+            response.headers["content-type"] = _ensure_charset(content_type)
         return response
 
     def _capture_bookmark(
@@ -169,10 +225,10 @@ def create_app(
         enrich: int,
     ) -> RedirectResponse:
         _write_guard(enable_write, enable_capture, is_capture=True)
+        parsed_tags = _validate_capture_inputs(title=title, url=url, tags=tags, notes=notes, folder=folder)
         records = find_records_by_url(paths, url, include_archived=True)
         existing_record = records[0] if records else None
 
-        parsed_tags = split_tags(tags)
         note_text = notes.strip()
 
         if existing_record is not None:
@@ -245,8 +301,10 @@ def create_app(
         tag: str = "",
         folder: str = "",
         include_archived: bool = Query(False),
+        limit: int = Query(WEB_LIST_DEFAULT_LIMIT, ge=1),
+        offset: int | None = Query(None, ge=0),
         page: int = Query(1, ge=1),
-        per_page: int = Query(20, ge=1, le=100),
+        per_page: int = Query(WEB_LIST_DEFAULT_LIMIT, ge=1, le=WEB_LIST_MAX_LIMIT),
     ) -> HTMLResponse:
         entries = load_index(paths)
         filtered = search_entries(
@@ -257,18 +315,33 @@ def create_app(
             include_archived=include_archived,
         )
         total = len(filtered)
-        total_pages = max(1, ceil(total / per_page)) if total else 1
-        if page > total_pages:
-            page = total_pages
-        start = (page - 1) * per_page
-        page_entries = filtered[start : start + per_page]
+        effective_limit = min(limit if limit > 0 else per_page, WEB_LIST_MAX_LIMIT)
+        if offset is not None:
+            start = offset
+            if total and start >= total:
+                start = max(total - effective_limit, 0)
+            total_pages = max(1, ceil(total / effective_limit)) if total else 1
+            page = (start // effective_limit) + 1
+            page_entries = filtered[start : start + effective_limit]
+            prev_url = _build_offset_url(
+                max(start - effective_limit, 0), effective_limit, search, tag, folder, include_archived
+            ) if start > 0 else None
+            next_url = _build_offset_url(
+                start + effective_limit, effective_limit, search, tag, folder, include_archived
+            ) if start + effective_limit < total else None
+        else:
+            total_pages = max(1, ceil(total / effective_limit)) if total else 1
+            if page > total_pages:
+                page = total_pages
+            start = (page - 1) * effective_limit
+            page_entries = filtered[start : start + effective_limit]
+            prev_url = _build_page_url(page - 1, effective_limit, search, tag, folder, include_archived) if page > 1 else None
+            next_url = _build_page_url(page + 1, effective_limit, search, tag, folder, include_archived) if page < total_pages else None
 
         rows = _entry_rows(page_entries)
         all_tags = sorted({tag_item for entry in entries if include_archived or not entry.archived for tag_item in entry.tags})
         all_folders = sorted({entry.folder_path for entry in entries if entry.folder_path and (include_archived or not entry.archived)})
         folder_tree = _build_folder_tree([entry for entry in entries if include_archived or not entry.archived])
-        prev_url = _build_page_url(page - 1, per_page, search, tag, folder, include_archived) if page > 1 else None
-        next_url = _build_page_url(page + 1, per_page, search, tag, folder, include_archived) if page < total_pages else None
 
         return templates.TemplateResponse(
             name="index.html",
@@ -281,7 +354,7 @@ def create_app(
                 "all_tags": all_tags,
                 "all_folders": all_folders,
                 "page": page,
-                "per_page": per_page,
+                "per_page": effective_limit,
                 "total": total,
                 "total_pages": total_pages,
                 "prev_url": prev_url,
@@ -389,6 +462,7 @@ def create_app(
         if remove.strip():
             remove_set = {item.lower() for item in split_tags(remove)}
             tags = [item for item in tags if item.lower() not in remove_set]
+        _require_tags(tags)
         record.bookmark.tags = tags
         persist_record(paths, record, rename_file=False)
         return RedirectResponse(url=f"/bookmark/{bookmark_id}", status_code=303)
@@ -415,6 +489,7 @@ def create_app(
         _write_guard(enable_write, enable_capture)
         record = load_record_by_id(paths, bookmark_id)
         text = notes.strip()
+        _require_length(text, field="notes", max_length=MAX_NOTES_LENGTH)
         record.bookmark.body = text
         record.bookmark.notes = text
         persist_record(paths, record, rename_file=False)

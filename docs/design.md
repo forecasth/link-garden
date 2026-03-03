@@ -37,3 +37,7 @@ Chrome import parses the local `Bookmarks` JSON recursively and turns URL nodes 
 ## Optional web surface
 
 `link_garden.web` (FastAPI) is an optional, experimental surface. The canonical workflow remains CLI-first with static exports.
+
+- Markdown display is sanitized to prevent executable content rendering.
+- Unsafe URL schemes (for example `javascript:`/`data:`) are blocked in rendered links.
+- Capture/write endpoints enforce conservative input size limits and return `400` on violations.

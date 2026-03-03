@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from link_garden.index import load_index
 from link_garden.storage import init_storage, read_bookmark_file
-from link_garden.web.app import create_app
+from link_garden.web.app import MAX_NOTES_LENGTH, MAX_TAGS, MAX_TITLE_LENGTH, create_app
 
 
 def test_capture_endpoint_creates_bookmark_and_redirects(tmp_path: Path) -> None:
@@ -101,3 +101,43 @@ def test_capture_endpoint_supports_post(tmp_path: Path) -> None:
     entries = load_index(paths)
     assert len(entries) == 1
     assert entries[0].title == "Captured Via Post"
+
+
+def test_capture_post_rejects_overlong_title(tmp_path: Path) -> None:
+    app = create_app(repo_dir=tmp_path, enable_capture=True)
+    client = TestClient(app)
+
+    response = client.post(
+        "/capture",
+        data={"url": "https://example.com/limit", "title": "t" * (MAX_TITLE_LENGTH + 1)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert "title exceeds max length" in response.json()["detail"]
+
+
+def test_capture_get_rejects_overlong_notes(tmp_path: Path) -> None:
+    app = create_app(repo_dir=tmp_path, enable_capture=True)
+    client = TestClient(app)
+
+    response = client.get(
+        "/capture",
+        params={"url": "https://example.com/limit", "notes": "n" * (MAX_NOTES_LENGTH + 1)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert "notes exceeds max length" in response.json()["detail"]
+
+
+def test_capture_post_rejects_too_many_tags(tmp_path: Path) -> None:
+    app = create_app(repo_dir=tmp_path, enable_capture=True)
+    client = TestClient(app)
+    tags = ",".join(f"tag{i}" for i in range(MAX_TAGS + 1))
+
+    response = client.post(
+        "/capture",
+        data={"url": "https://example.com/limit", "tags": tags},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    assert "max tag count" in response.json()["detail"]

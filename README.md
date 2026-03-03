@@ -146,3 +146,13 @@ The FastAPI web interface under `link_garden.web` is optional and currently expe
 - Primary interface remains the CLI + static export flow.
 - Web defaults are read-only (`enable_write=False`, `enable_capture=False`).
 - If you enable capture, prefer `POST /capture` because query-string `GET /capture` requests can leak URLs/notes into browser history and proxy logs.
+
+### Web Safety + Limits
+
+- Rendered markdown is sanitized before display; raw script/svg/foreignObject content is stripped.
+- Web links only allow `http://` and `https://` schemes. `javascript:` and `data:` links are blocked.
+- Web responses include CSP and baseline security headers. CSP currently allows inline styles because templates still contain inline `style=""` attributes.
+- Capture/write inputs are capped (title/url/notes/folder/tags) and over-limit requests return `400`.
+- Index listing defaults to `limit=50` and clamps to a max of `100` (`offset` supported).
+
+Tune these defaults by editing constants in [link_garden/web/app.py](link_garden/web/app.py).
