@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,9 +38,23 @@ def resolve_paths(root: Path | str | None = None, data_dir: Path | str | None = 
     return StoragePaths(root=root_path, data_dir=resolved_data_dir, bookmarks_dir=bookmarks_dir, index_file=index_file)
 
 
+def _harden_directory_permissions(path: Path) -> None:
+    if os.name != "posix":
+        return
+    try:
+        # Keep data local to the owner by default on POSIX systems.
+        path.chmod(0o700)
+    except OSError:
+        # Best-effort only; some filesystems or ACL setups may reject chmod.
+        return
+
+
 def init_storage(root: Path | str | None = None, data_dir: Path | str | None = None) -> StoragePaths:
     paths = resolve_paths(root, data_dir=data_dir)
+    paths.data_dir.mkdir(parents=True, exist_ok=True)
     paths.bookmarks_dir.mkdir(parents=True, exist_ok=True)
+    _harden_directory_permissions(paths.data_dir)
+    _harden_directory_permissions(paths.bookmarks_dir)
     if not paths.index_file.exists():
         atomic_write_text(paths.index_file, "[]\n")
     return paths
