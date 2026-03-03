@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Quickstart - Link Garden Docs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Quickstart</p>
+        <h1>Quickstart</h1>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/">Overview</a>
+          <a href="/docs/quickstart/" aria-current="page">Quickstart</a>
+          <a href="/docs/importing-chrome/">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/">Exporting</a>
+          <a href="/docs/serving/">Serving</a>
+          <a href="/docs/self-hosting/">Self-hosting</a>
+          <a href="/docs/security/">Security</a>
+          <a href="/docs/troubleshooting/">Troubleshooting</a>
+        </nav>
+
+        <section class="panel">
+          <h2>Requirements</h2>
+          <ul>
+            <li>Python 3.11+ (from <code>pyproject.toml</code>).</li>
+            <li>A local folder where you want your garden files.</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h2>Install</h2>
+          <pre><code>python -m venv .venv
+. .venv/bin/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
+pip install -e ".[dev]"</code></pre>
+          <p>
+            If you install from source with the editable command above, the <code>link-garden</code> CLI entry point becomes
+            available.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Create a garden directory</h2>
+          <pre><code>mkdir my-garden
+cd my-garden
+link-garden init .</code></pre>
+          <p>
+            This creates <code>data/bookmarks/</code>, <code>data/index.json</code>, and (if missing) a secure
+            <code>config.yaml</code>.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Add your first bookmark</h2>
+          <pre><code>link-garden add --url "https://example.com" --title "Example" --tags "reference,docs"</code></pre>
+          <p>New bookmarks use <code>default_visibility</code> from <code>config.yaml</code> (secure default: <code>private</code>).</p>
+        </section>
+
+        <section class="panel">
+          <h2>List and search</h2>
+          <pre><code>link-garden list --limit 20
+link-garden list --search "example"
+link-garden list --tag docs
+link-garden list --folder "bookmark_bar/Research"
+link-garden list --visibility private</code></pre>
+          <p>
+            The list command reads from the index, supports filters, and prints tab-separated rows including visibility, tags,
+            folder, and archived state.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Export and serve safely</h2>
+          <pre><code>link-garden export --format html --out ./exports --scope public
+link-garden serve --repo-dir . --port 8000</code></pre>
+          <p>By default, serving binds to <code>127.0.0.1</code> and uses public scope unless config/flags say otherwise.</p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

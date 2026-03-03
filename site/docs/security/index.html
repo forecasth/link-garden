@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Security - Link Garden Docs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Security</p>
+        <h1>Security and visibility model</h1>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/">Overview</a>
+          <a href="/docs/quickstart/">Quickstart</a>
+          <a href="/docs/importing-chrome/">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/">Exporting</a>
+          <a href="/docs/serving/">Serving</a>
+          <a href="/docs/self-hosting/">Self-hosting</a>
+          <a href="/docs/security/" aria-current="page">Security</a>
+          <a href="/docs/troubleshooting/">Troubleshooting</a>
+        </nav>
+
+        <section class="panel">
+          <h2>Threat model focus</h2>
+          <p>
+            The main risk is accidental exposure: serving on a public interface by mistake, exporting private entries, or
+            publishing files without review.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Visibility states and scopes</h2>
+          <ul>
+            <li><code>private</code>: local-only by default, excluded from public/unlisted exports.</li>
+            <li><code>unlisted</code>: included only when scope is <code>unlisted</code> or <code>all</code>.</li>
+            <li><code>public</code>: included in public exports.</li>
+          </ul>
+          <p>Scope behavior in code:</p>
+          <ul>
+            <li><code>public</code> => only <code>public</code></li>
+            <li><code>unlisted</code> => <code>public</code> + <code>unlisted</code></li>
+            <li><code>all</code> => all visibility levels (requires explicit danger flag)</li>
+          </ul>
+          <pre><code>link-garden set-visibility --id &lt;bookmark_id&gt; --visibility public
+link-garden export --format html --out ./exports --scope all --dangerous-all</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Secure defaults</h2>
+          <pre><code>default_visibility: private
+export_default_scope: public
+serve_default_scope: public
+server_bind_host: 127.0.0.1
+require_allow_remote: true</code></pre>
+          <p>
+            If <code>config.yaml</code> is missing, Link Garden falls back to these secure defaults.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Doctor checks</h2>
+          <pre><code>link-garden doctor
+link-garden doctor --rebuild-index
+link-garden doctor --fix</code></pre>
+          <p>The doctor command checks for common issues, including:</p>
+          <ul>
+            <li>config warnings and insecure config values</li>
+            <li>invalid frontmatter or missing bookmark files</li>
+            <li>duplicate IDs/URLs in index data</li>
+            <li>private bookmark URLs leaking into exported HTML</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h2>Non-goals</h2>
+          <ul>
+            <li>No built-in internet auth gateway.</li>
+            <li>No multi-tenant isolation model.</li>
+            <li>No managed cloud security layer.</li>
+          </ul>
+          <p>
+            Full policy: <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY.md</a>.
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

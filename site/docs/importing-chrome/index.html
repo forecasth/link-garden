@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Importing Chrome - Link Garden Docs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Importing Chrome</p>
+        <h1>Importing Chrome bookmarks</h1>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/">Overview</a>
+          <a href="/docs/quickstart/">Quickstart</a>
+          <a href="/docs/importing-chrome/" aria-current="page">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/">Exporting</a>
+          <a href="/docs/serving/">Serving</a>
+          <a href="/docs/self-hosting/">Self-hosting</a>
+          <a href="/docs/security/">Security</a>
+          <a href="/docs/troubleshooting/">Troubleshooting</a>
+        </nav>
+
+        <section class="panel">
+          <h2>Basic command</h2>
+          <pre><code>link-garden import-chrome --bookmarks-file ./Bookmarks</code></pre>
+          <p>
+            The importer expects Chrome's JSON bookmarks file and traverses nested folders recursively.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Folder preservation</h2>
+          <p>
+            Folder lineage is preserved in <code>folder_path</code>. Chrome roots are included, so paths often start with
+            <code>bookmark_bar</code>, <code>other</code>, or <code>synced</code>.
+          </p>
+          <pre><code>bookmark_bar/Research/GPCR
+other</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Dedupe modes</h2>
+          <p>Use <code>--dedupe by_url|by_guid|both</code> (default: <code>both</code>).</p>
+          <ul>
+            <li><code>by_guid</code>: updates only when Chrome GUID matches existing index entries.</li>
+            <li><code>by_url</code>: matches normalized URLs (strips trailing slash and <code>utm_*</code> params).</li>
+            <li><code>both</code>: tries GUID first, then normalized URL fallback.</li>
+          </ul>
+          <pre><code>link-garden import-chrome --bookmarks-file ./Bookmarks --dedupe both</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Dry-run and watch mode</h2>
+          <pre><code>link-garden import-chrome --bookmarks-file ./Bookmarks --dry-run
+link-garden import-chrome --bookmarks-file ./Bookmarks --watch --interval 60</code></pre>
+          <p>
+            <code>--dry-run</code> prints what would change without writing files. <code>--watch</code> polls for file changes and
+            re-runs import automatically.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Visibility on imported bookmarks</h2>
+          <p>
+            Imported items use your configured <code>default_visibility</code>. With secure defaults, new imports start as
+            <code>private</code>.
+          </p>
+          <pre><code>default_visibility: private</code></pre>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

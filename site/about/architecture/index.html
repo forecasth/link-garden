@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture - Link Garden</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/" aria-current="page">About</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/about/">About</a> / Architecture</p>
+        <h1>Architecture in plain language</h1>
+
+        <nav class="section-nav" aria-label="About pages">
+          <a href="/about/">Overview</a>
+          <a href="/about/philosophy/">Philosophy</a>
+          <a href="/about/privacy/">Privacy stance</a>
+          <a href="/about/architecture/" aria-current="page">Architecture</a>
+        </nav>
+
+        <section class="panel">
+          <p>
+            Link Garden keeps data as local files first, then builds a compact index for fast searching and filtering. The CLI
+            reads from and writes to those files, and exports static output when you choose to share.
+          </p>
+          <p>
+            You can use Link Garden only on your machine, or add optional hosting later. Nothing in the core model requires a
+            cloud account.
+          </p>
+        </section>
+
+        <details>
+          <summary>Files on disk (Markdown + frontmatter)</summary>
+          <p>
+            Each bookmark is saved as one Markdown file under <code>data/bookmarks/</code>. The metadata lives in YAML
+            frontmatter; optional long text lives in the Markdown body.
+          </p>
+          <p><strong>Why this exists:</strong> human-readable files are easier to back up, move, and inspect.</p>
+          <pre><code>---
+id: a1b2c3d4e5
+title: Example Domain
+url: https://example.com
+tags: [reference]
+saved_at: "2026-03-02T07:45:00Z"
+folder_path: bookmark_bar/Examples
+visibility: private
+---
+
+This is optional body text.</code></pre>
+        </details>
+
+        <details>
+          <summary>Indexing (why an index exists)</summary>
+          <p>
+            A separate <code>data/index.json</code> file stores compact rows for quick list/search operations, so commands do not
+            need to fully parse every Markdown file each time.
+          </p>
+          <p><strong>Why this exists:</strong> speed and predictable CLI output on larger bookmark sets.</p>
+          <pre><code>[
+  {
+    "id": "a1b2c3d4e5",
+    "title": "Example Domain",
+    "url": "https://example.com",
+    "path": "data/bookmarks/20260302T074500Z__example-domain__a1b2c3d4e5.md",
+    "visibility": "private"
+  }
+]</code></pre>
+        </details>
+
+        <details>
+          <summary>Importing (Chrome bookmarks)</summary>
+          <p>
+            The importer reads Chrome's JSON format recursively and keeps folder lineage in <code>folder_path</code> (for example
+            <code>bookmark_bar/Research/GPCR</code>).
+          </p>
+          <p><strong>Why this exists:</strong> to move existing bookmark history into a local, portable format.</p>
+          <pre><code>link-garden import-chrome --bookmarks-file ./Bookmarks --dedupe both
+link-garden import-chrome --bookmarks-file ./Bookmarks --dry-run
+link-garden import-chrome --bookmarks-file ./Bookmarks --watch --interval 60</code></pre>
+        </details>
+
+        <details>
+          <summary>Exporting (HTML / Markdown / JSON)</summary>
+          <p>
+            Exports are generated from local files with visibility filtering. HTML produces <code>index.html</code> and
+            <code>bookmarks.html</code>; Markdown produces <code>bookmarks.md</code>; JSON produces
+            <code>bookmarks.json</code>.
+          </p>
+          <p><strong>Why this exists:</strong> one source of truth, multiple sharing formats.</p>
+          <pre><code>link-garden export --format html --out ./exports --scope public
+link-garden export --format markdown --out ./exports --scope unlisted
+link-garden export --format json --out ./exports --scope all --dangerous-all</code></pre>
+        </details>
+
+        <details>
+          <summary>Serving locally</summary>
+          <p>
+            The <code>serve</code> command creates a temporary HTML export (unless <code>--static-dir</code> is given) and serves
+            it with Python's built-in HTTP server.
+          </p>
+          <p><strong>Why this exists:</strong> quick local browsing without extra deployment setup.</p>
+          <pre><code>link-garden serve --repo-dir . --port 8000
+link-garden serve --repo-dir . --export-mode public
+link-garden serve --static-dir ./exports --port 8080</code></pre>
+        </details>
+
+        <details>
+          <summary>Self-hosting with nginx (optional)</summary>
+          <p>
+            Remote access is optional. The recommended pattern is: keep Link Garden on localhost and put nginx in front for auth,
+            TLS, and rate limits.
+          </p>
+          <p><strong>Why this exists:</strong> avoid exposing raw app ports directly to the internet.</p>
+          <pre><code>server {
+    listen 80;
+    server_name links.example.com;
+    location / {
+        auth_basic "Restricted";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://127.0.0.1:8000;
+    }
+}</code></pre>
+        </details>
+
+        <details>
+          <summary>Security &amp; visibility (private/unlisted/public)</summary>
+          <p>
+            Bookmarks are marked <code>private</code>, <code>unlisted</code>, or <code>public</code>. Export and serve scopes
+            decide what gets included, with explicit confirmation required for full-scope export.
+          </p>
+          <p><strong>Why this exists:</strong> sharing should be explicit and reversible, not automatic.</p>
+          <pre><code>link-garden set-visibility --id a1b2c3d4e5 --visibility public
+link-garden export --format html --out ./exports --scope all --dangerous-all
+
+# secure config defaults
+default_visibility: private
+export_default_scope: public
+serve_default_scope: public
+server_bind_host: 127.0.0.1
+require_allow_remote: true</code></pre>
+        </details>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

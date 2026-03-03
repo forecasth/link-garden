@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Troubleshooting - Link Garden Docs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Troubleshooting</p>
+        <h1>Troubleshooting</h1>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/">Overview</a>
+          <a href="/docs/quickstart/">Quickstart</a>
+          <a href="/docs/importing-chrome/">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/">Exporting</a>
+          <a href="/docs/serving/">Serving</a>
+          <a href="/docs/self-hosting/">Self-hosting</a>
+          <a href="/docs/security/">Security</a>
+          <a href="/docs/troubleshooting/" aria-current="page">Troubleshooting</a>
+        </nav>
+
+        <section class="panel">
+          <h2>First check: run doctor</h2>
+          <pre><code>link-garden doctor</code></pre>
+          <p>
+            This catches common consistency and safety issues early. If the index is stale, use:
+          </p>
+          <pre><code>link-garden doctor --rebuild-index
+link-garden doctor --fix</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Common issues</h2>
+
+          <h3><code>link-garden</code> command not found</h3>
+          <p>Activate your virtual environment and reinstall editable package:</p>
+          <pre><code>pip install -e ".[dev]"</code></pre>
+
+          <h3>No rows from <code>link-garden list</code></h3>
+          <p>
+            You may be in the wrong directory, filtered too narrowly, or only have archived entries. Try:
+          </p>
+          <pre><code>link-garden list --include-archived --limit 200</code></pre>
+
+          <h3>Import creates duplicates or updates unexpected rows</h3>
+          <p>
+            Recheck dedupe mode. <code>both</code> (default) uses GUID first, then normalized URL fallback.
+          </p>
+          <pre><code>link-garden import-chrome --bookmarks-file ./Bookmarks --dedupe both --dry-run</code></pre>
+
+          <h3>Export fails for scope all</h3>
+          <p>
+            Full-scope export requires explicit opt-in:
+          </p>
+          <pre><code>link-garden export --format html --out ./exports --scope all --dangerous-all</code></pre>
+
+          <h3>Serve refuses non-localhost bind</h3>
+          <p>When <code>require_allow_remote: true</code>, you must explicitly opt in:</p>
+          <pre><code>link-garden serve --host 0.0.0.0 --allow-remote</code></pre>
+
+          <h3>Doctor reports private export leak</h3>
+          <p>
+            Rebuild a clean public export and stop publishing broad-scope output.
+          </p>
+          <pre><code>link-garden export --format html --out ./exports --scope public</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Index repair directly</h2>
+          <pre><code>link-garden rebuild-index --dry-run
+link-garden rebuild-index</code></pre>
+          <p>
+            <code>rebuild-index</code> rescans Markdown files and reconstructs <code>data/index.json</code>.
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

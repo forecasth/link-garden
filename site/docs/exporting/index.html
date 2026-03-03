@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Exporting - Link Garden Docs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Exporting</p>
+        <h1>Exporting</h1>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/">Overview</a>
+          <a href="/docs/quickstart/">Quickstart</a>
+          <a href="/docs/importing-chrome/">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/" aria-current="page">Exporting</a>
+          <a href="/docs/serving/">Serving</a>
+          <a href="/docs/self-hosting/">Self-hosting</a>
+          <a href="/docs/security/">Security</a>
+          <a href="/docs/troubleshooting/">Troubleshooting</a>
+        </nav>
+
+        <section class="panel">
+          <h2>Command</h2>
+          <pre><code>link-garden export --format markdown|json|html --out ./exports [--scope public|unlisted|all] [--dangerous-all]</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Visibility scopes</h2>
+          <ul>
+            <li><code>public</code>: includes only bookmarks marked <code>public</code>.</li>
+            <li><code>unlisted</code>: includes <code>public</code> + <code>unlisted</code>.</li>
+            <li><code>all</code>: includes <code>public</code> + <code>unlisted</code> + <code>private</code>.</li>
+          </ul>
+          <p>
+            <code>--scope all</code> is guarded. You must pass <code>--dangerous-all</code>, otherwise export fails.
+          </p>
+          <pre><code>link-garden export --format json --out ./exports --scope all --dangerous-all</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Output files and included data</h2>
+          <h3>HTML</h3>
+          <ul>
+            <li>Primary output: <code>index.html</code>.</li>
+            <li>Compatibility copy: <code>bookmarks.html</code> (same content).</li>
+            <li>Includes title, URL, visibility, saved time, tags, folder, and notes/body text.</li>
+            <li>Shows a warning banner when scope is broader than public.</li>
+          </ul>
+
+          <h3>Markdown</h3>
+          <ul>
+            <li>Output: <code>bookmarks.md</code>.</li>
+            <li>One bullet per bookmark with link, visibility, saved time, tags, folder, and source file path.</li>
+            <li>Adds indented <code>notes</code> and <code>body</code> lines when present.</li>
+          </ul>
+
+          <h3>JSON</h3>
+          <ul>
+            <li>Output: <code>bookmarks.json</code>.</li>
+            <li>Array of full bookmark objects from the internal model (including visibility and metadata fields).</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h2>Examples</h2>
+          <pre><code>link-garden export --format html --out ./exports --scope public
+link-garden export --format markdown --out ./exports --scope unlisted
+link-garden export --format json --out ./exports --scope public</code></pre>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Stance - Link Garden</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/" aria-current="page">About</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/about/">About</a> / Privacy stance</p>
+        <h1>Privacy stance (practical, not legal)</h1>
+
+        <nav class="section-nav" aria-label="About pages">
+          <a href="/about/">Overview</a>
+          <a href="/about/philosophy/">Philosophy</a>
+          <a href="/about/privacy/" aria-current="page">Privacy stance</a>
+          <a href="/about/architecture/">Architecture</a>
+        </nav>
+
+        <section class="panel">
+          <p>
+            Link Garden exists partly to reduce dependence on large platforms and closed ecosystems. The data model is simple:
+            Markdown files and YAML frontmatter you can inspect, back up, and move without vendor lock-in.
+          </p>
+          <p>
+            Publishing is your choice. You can keep everything local, export only public items, or include broader scopes when you
+            explicitly decide to do that.
+          </p>
+          <p>
+            The safest default is local-only use with private visibility. If you publish, treat it as public internet content and
+            avoid sharing anything sensitive.
+          </p>
+          <p class="notice">
+            Do not publish private bookmarks publicly. If a link, note, or title would be risky when indexed or shared, keep it in
+            private scope.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Practical privacy tips</h2>
+          <ul>
+            <li>Keep `default_visibility: private` in `config.yaml` unless you intentionally want a broader default.</li>
+            <li>Use `link-garden export --scope public` for anything that may be shared.</li>
+            <li>Only use `--scope all` with `--dangerous-all` when you explicitly need a private backup export.</li>
+            <li>Run `link-garden doctor` before publishing exported HTML.</li>
+            <li>Keep `serve` bound to localhost unless you have a reverse proxy, auth, TLS, and firewall controls.</li>
+            <li>Assume bookmark titles and notes can reveal sensitive context even if URLs look harmless.</li>
+            <li>Store backups in private locations; do not sync private exports to public buckets.</li>
+            <li>Review old bookmarks periodically and archive or redact entries you no longer want exposed.</li>
+          </ul>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

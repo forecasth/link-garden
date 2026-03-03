@@ -111,3 +111,26 @@ link-garden hub export --out <dir>
 - Submission is manual and opt-in.
 
 Details: [docs/hub.md](docs/hub.md)
+
+## Website
+
+This repository includes a standalone static website project in [`site/`](site/).
+
+- Purpose: documentation, philosophy, and onboarding content.
+- Separation: the site is independent from the CLI runtime code.
+- Deployment: suitable for GitHub Pages or any static host.
+
+Run locally (single command from repo root):
+
+```bash
+python -m http.server 4173 --directory site
+```
+
+Or:
+
+```bash
+cd site
+python -m http.server 4173
+```
+
+Then open `http://localhost:4173`.

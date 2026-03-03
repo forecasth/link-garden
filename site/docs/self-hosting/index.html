@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Self-hosting - Link Garden Docs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Self-hosting</p>
+        <h1>Self-hosting (optional)</h1>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/">Overview</a>
+          <a href="/docs/quickstart/">Quickstart</a>
+          <a href="/docs/importing-chrome/">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/">Exporting</a>
+          <a href="/docs/serving/">Serving</a>
+          <a href="/docs/self-hosting/" aria-current="page">Self-hosting</a>
+          <a href="/docs/security/">Security</a>
+          <a href="/docs/troubleshooting/">Troubleshooting</a>
+        </nav>
+
+        <section class="panel">
+          <p class="notice">
+            Optional path. The default recommendation is still local-only use. If you expose access remotely, put nginx in front
+            and require auth.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>1) Run Link Garden on localhost</h2>
+          <pre><code>link-garden serve --repo-dir /srv/link-garden --port 8000</code></pre>
+          <p>Keep secure defaults in <code>config.yaml</code>:</p>
+          <pre><code>server_bind_host: 127.0.0.1
+require_allow_remote: true
+serve_default_scope: public</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>2) nginx reverse proxy example</h2>
+          <pre><code>server {
+    listen 80;
+    server_name links.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}</code></pre>
+        </section>
+
+        <section class="panel">
+          <h2>3) Add authentication at the proxy</h2>
+          <pre><code>location / {
+    auth_basic "Restricted";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}</code></pre>
+          <p>Add TLS and firewall rules before internet-facing use.</p>
+        </section>
+
+        <section class="panel">
+          <h2>4) Hardening checklist</h2>
+          <ul>
+            <li>Use HTTPS/TLS for remote access.</li>
+            <li>Require authentication (Basic Auth or stronger) at nginx.</li>
+            <li>Do not expose the internal app port directly.</li>
+            <li>Use rate limits and firewall restrictions.</li>
+            <li>Run <code>link-garden doctor</code> before publishing exports.</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <p>
+            For the full project guidance, read
+            <a href="https://github.com/forecasth/link-garden/blob/main/docs/self-hosting.md">docs/self-hosting.md</a>.
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

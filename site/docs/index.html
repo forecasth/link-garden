@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Docs - Link Garden</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / Docs</p>
+        <h1>Documentation</h1>
+        <p class="lead">
+          This section reflects the current CLI behavior in this repository (checked against command help and source on March 3,
+          2026).
+        </p>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/" aria-current="page">Overview</a>
+          <a href="/docs/quickstart/">Quickstart</a>
+          <a href="/docs/importing-chrome/">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/">Exporting</a>
+          <a href="/docs/serving/">Serving</a>
+          <a href="/docs/self-hosting/">Self-hosting</a>
+          <a href="/docs/security/">Security</a>
+          <a href="/docs/troubleshooting/">Troubleshooting</a>
+        </nav>
+
+        <section class="grid two">
+          <article class="panel">
+            <h2>Start here</h2>
+            <ul>
+              <li><a href="/docs/quickstart/">Quickstart</a> for setup and first commands.</li>
+              <li><a href="/docs/importing-chrome/">Importing Chrome</a> for migration and dedupe behavior.</li>
+              <li><a href="/docs/organizing-and-frontmatter/">Organizing and frontmatter</a> for daily curation workflow.</li>
+            </ul>
+          </article>
+          <article class="panel">
+            <h2>Publishing and safety</h2>
+            <ul>
+              <li><a href="/docs/exporting/">Exporting</a> for format details and scope behavior.</li>
+              <li><a href="/docs/serving/">Serving</a> for localhost/static-dir usage.</li>
+              <li><a href="/docs/security/">Security</a> for visibility defaults and doctor checks.</li>
+              <li><a href="/docs/self-hosting/">Self-hosting</a> for optional nginx reverse proxy setup.</li>
+            </ul>
+          </article>
+        </section>
+
+        <section class="panel">
+          <h2>Command map</h2>
+          <pre><code>link-garden init &lt;dir&gt;
+link-garden add --url &lt;url&gt; [--title ...] [--tags ...] [--notes ...] [--folder ...]
+link-garden import-chrome --bookmarks-file &lt;path&gt; [--dedupe by_url|by_guid|both] [--dry-run] [--watch]
+link-garden list [--search ...] [--tag ...] [--folder ...] [--visibility ...]
+link-garden set-visibility --id &lt;id&gt; --visibility private|unlisted|public
+link-garden export --format markdown|json|html --out &lt;dir&gt; [--scope public|unlisted|all] [--dangerous-all]
+link-garden serve [--repo-dir .] [--port 8000] [--export-mode public|unlisted|all] [--allow-remote]
+link-garden doctor [--rebuild-index] [--fix]
+link-garden rebuild-index [--dry-run]
+link-garden duplicates [--include-archived]
+link-garden backup --out &lt;dir&gt; [--format zip|tar|copy]
+link-garden hub export --out &lt;dir&gt;</code></pre>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>

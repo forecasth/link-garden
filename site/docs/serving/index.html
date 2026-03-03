@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Serving - Link Garden Docs</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="container header-row">
+        <a class="brand" href="/">Link Garden</a>
+        <nav class="top-nav" aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about/">About</a>
+          <a href="/docs/" aria-current="page">Docs</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="container stack">
+        <p class="breadcrumbs"><a href="/">Home</a> / <a href="/docs/">Docs</a> / Serving</p>
+        <h1>Serving locally</h1>
+
+        <nav class="section-nav" aria-label="Docs pages">
+          <a href="/docs/">Overview</a>
+          <a href="/docs/quickstart/">Quickstart</a>
+          <a href="/docs/importing-chrome/">Importing Chrome</a>
+          <a href="/docs/organizing-and-frontmatter/">Organizing &amp; frontmatter</a>
+          <a href="/docs/exporting/">Exporting</a>
+          <a href="/docs/serving/" aria-current="page">Serving</a>
+          <a href="/docs/self-hosting/">Self-hosting</a>
+          <a href="/docs/security/">Security</a>
+          <a href="/docs/troubleshooting/">Troubleshooting</a>
+        </nav>
+
+        <section class="panel">
+          <h2>Default behavior</h2>
+          <pre><code>link-garden serve --repo-dir . --port 8000</code></pre>
+          <ul>
+            <li>Binds to localhost by default (<code>127.0.0.1</code> unless overridden in config/flags).</li>
+            <li>Exports HTML to a temporary directory, then serves it.</li>
+            <li>Uses the configured/default serve scope (secure default: <code>public</code>).</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h2>Options you will use most</h2>
+          <pre><code>link-garden serve --repo-dir . --port 8080 --open-browser
+link-garden serve --repo-dir . --export-mode unlisted
+link-garden serve --repo-dir . --export-mode all --dangerous-all
+link-garden serve --static-dir ./exports --port 8080</code></pre>
+          <p>
+            <code>--static-dir</code> skips temp export generation and serves an existing exported directory directly.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Remote bind safety guard</h2>
+          <p>
+            If you bind to a non-local address (for example <code>0.0.0.0</code>) and
+            <code>require_allow_remote: true</code> is enabled, you must pass <code>--allow-remote</code>.
+          </p>
+          <pre><code>link-garden serve --host 0.0.0.0 --port 8000 --allow-remote</code></pre>
+          <p class="notice">
+            Serving directly on public interfaces is risky. Prefer localhost + reverse proxy with auth and TLS.
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-row">
+        <p>Link Garden is open source.</p>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="https://github.com/forecasth/link-garden">GitHub repo</a>
+          <a href="https://github.com/forecasth/link-garden/blob/main/SECURITY.md">SECURITY</a>
+          <a href="/docs/">Docs</a>
+        </nav>
+      </div>
+    </footer>
+  </body>
+</html>
