@@ -2,7 +2,7 @@
 
 Local-first bookmark + notes knowledge garden with Markdown frontmatter storage.
 
-## Quickstart
+## Beginner Quickstart (10-15 minutes)
 
 1. Create and activate a virtual environment.
 2. Install:
@@ -11,7 +11,7 @@ Local-first bookmark + notes knowledge garden with Markdown frontmatter storage.
 pip install -e ".[dev]"
 ```
 
-3. Initialize the repo:
+3. Initialize a project:
 
 ```bash
 link-garden init .
@@ -23,19 +23,58 @@ link-garden init .
 link-garden add --url "https://example.com" --title "Example" --tags "reference,docs"
 ```
 
-5. Build a public-safe export:
+5. List what you have:
+
+```bash
+link-garden list --root .
+```
+
+6. (Optional) Import Chrome bookmarks carefully:
+
+Find your Chrome profile path in `chrome://version` (look for **Profile Path**), then select the `Bookmarks` file in that profile directory.
+
+Common locations:
+
+- Windows: `%LOCALAPPDATA%\\Google\\Chrome\\User Data\\<Profile>\\Bookmarks`
+- macOS: `~/Library/Application Support/Google/Chrome/<Profile>/Bookmarks`
+- Linux: `~/.config/google-chrome/<Profile>/Bookmarks` (or Chromium equivalent)
+
+Preview first:
+
+```bash
+link-garden import-chrome --bookmarks-file "<path-to-Bookmarks>" --root . --dry-run
+```
+
+Then run for real:
+
+```bash
+link-garden import-chrome --bookmarks-file "<path-to-Bookmarks>" --root .
+```
+
+7. Build a public-safe export:
 
 ```bash
 link-garden export --format html --out ./exports --scope public
 ```
 
-6. Serve locally (localhost-only by default):
+8. Serve locally (localhost-only by default):
 
 ```bash
 link-garden serve --repo-dir . --port 8000
 ```
 
+9. Run a health check before sharing:
+
+```bash
+link-garden doctor --root .
+```
+
 By default, serving is local-only (`127.0.0.1`) and public-scope. For self-hosting, follow [docs/self-hosting.md](docs/self-hosting.md).
+
+Quick links:
+
+- [Recovery cookbook](docs/recovery.md)
+- [Changelog](CHANGELOG.md)
 
 ## Security Model
 
@@ -106,6 +145,24 @@ link-garden hub export --out <dir>
 
 `rebuild-index` is now non-destructive when parse errors are found: it writes `data/index.rebuild.json` and leaves `data/index.json` unchanged unless `--yes` is provided.
 
+## Demo Dataset
+
+Generate a small, varied dataset for testing and screenshots:
+
+```bash
+# Safe default: writes to a new temp directory
+python examples/demo_seed.py
+
+# Explicit root (prompts before appending if data already exists)
+python examples/demo_seed.py --root ./demo-garden
+```
+
+Then inspect it:
+
+```bash
+link-garden list --root ./demo-garden
+```
+
 ## Hub
 
 `hub export` builds a static, opt-in directory page from local `hub.yaml`.
@@ -141,7 +198,7 @@ Then open `http://localhost:4173`.
 
 ## Experimental Web App (Opt-in)
 
-The FastAPI web interface under `link_garden.web` is optional and currently experimental.
+The FastAPI web interface under `link_garden.web` is optional and currently experimental. Use it for local curation convenience; treat CLI + static export as the primary stable path for publishing and long-term workflows. Remaining risk is the usual one for local web surfaces: browser history/log leakage when using query-string capture (`GET /capture`), so prefer `POST /capture` and keep default local-only exposure.
 
 - Primary interface remains the CLI + static export flow.
 - Web defaults are read-only (`enable_write=False`, `enable_capture=False`).
