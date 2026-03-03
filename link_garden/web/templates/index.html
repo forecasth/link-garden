@@ -57,7 +57,11 @@
       </div>
       <div class="meta">{{ row.saved_at }}{% if row.folder_path %} | {{ row.folder_path }}{% endif %}</div>
       <div class="row" style="margin-top:0.45rem;">
-        <a href="{{ row.url }}" target="_blank" rel="noopener">Open URL</a>
+        {% if row.safe_url %}
+        <a href="{{ row.safe_url }}" target="_blank" rel="noopener">Open URL</a>
+        {% else %}
+        <span class="muted">Open URL disabled (unsafe scheme)</span>
+        {% endif %}
       </div>
       {% if row.description %}
       <p class="muted" style="margin:0.45rem 0 0 0;">{{ row.description }}</p>

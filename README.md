@@ -138,3 +138,11 @@ python -m http.server 4173
 ```
 
 Then open `http://localhost:4173`.
+
+## Experimental Web App (Opt-in)
+
+The FastAPI web interface under `link_garden.web` is optional and currently experimental.
+
+- Primary interface remains the CLI + static export flow.
+- Web defaults are read-only (`enable_write=False`, `enable_capture=False`).
+- If you enable capture, prefer `POST /capture` because query-string `GET /capture` requests can leak URLs/notes into browser history and proxy logs.

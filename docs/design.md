@@ -33,3 +33,7 @@ Chrome import parses the local `Bookmarks` JSON recursively and turns URL nodes 
 - `by_url`: fallback for migrated or missing GUIDs.
 - `both`: robust default (guid first, normalized URL second).
 - New imports use `default_visibility` from `config.yaml` (default: `private`).
+
+## Optional web surface
+
+`link_garden.web` (FastAPI) is an optional, experimental surface. The canonical workflow remains CLI-first with static exports.

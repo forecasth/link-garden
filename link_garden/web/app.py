@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from math import ceil
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -10,6 +11,7 @@ from fastapi import FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 
 from link_garden.bookmarks import BookmarkRecord, find_records_by_url, load_record_by_id, persist_record
 from link_garden.config import load_config
@@ -18,7 +20,21 @@ from link_garden.index import find_duplicate_entries, load_index, search_entries
 from link_garden.model import Bookmark, IndexEntry
 from link_garden.storage import init_storage, read_bookmark_file, relative_to_root, write_bookmark
 from link_garden.utils import generate_short_id, normalize_folder_path, split_tags, utc_now_iso
+from link_garden.web.sanitize import sanitize_html, sanitize_link_url
 from link_garden.web.theme import compile_theme, resolve_theme_file
+
+logger = logging.getLogger(__name__)
+
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'none'; object-src 'none'; "
+        "base-uri 'none'; frame-ancestors 'none'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; form-action 'self'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+}
 
 
 def _entry_domain(url: str) -> str:
@@ -54,6 +70,7 @@ def _entry_rows(entries: list[IndexEntry]) -> list[dict[str, object]]:
             "id": entry.id,
             "title": entry.title,
             "url": entry.url,
+            "safe_url": sanitize_link_url(entry.url),
             "tags": entry.tags,
             "saved_at": entry.saved_at,
             "folder_path": entry.folder_path,
@@ -134,6 +151,92 @@ def create_app(
 
     app = FastAPI(title="link-garden")
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        for key, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(key, value)
+        return response
+
+    def _capture_bookmark(
+        *,
+        url: str,
+        title: str,
+        tags: str,
+        notes: str,
+        folder: str,
+        enrich: int,
+    ) -> RedirectResponse:
+        _write_guard(enable_write, enable_capture, is_capture=True)
+        records = find_records_by_url(paths, url, include_archived=True)
+        existing_record = records[0] if records else None
+
+        parsed_tags = split_tags(tags)
+        note_text = notes.strip()
+
+        if existing_record is not None:
+            bookmark = existing_record.bookmark
+            if title.strip():
+                bookmark.title = title.strip()
+            if folder.strip():
+                bookmark.folder_path = normalize_folder_path(folder)
+            if parsed_tags:
+                bookmark.tags = _merge_tags(bookmark.tags, parsed_tags)
+            if note_text:
+                if bookmark.body:
+                    if note_text not in bookmark.body:
+                        bookmark.body = f"{bookmark.body}\n\n{note_text}"
+                else:
+                    bookmark.body = note_text
+                if not bookmark.notes:
+                    bookmark.notes = note_text
+            bookmark.source = "capture"
+            bookmark.url = url.strip()
+            synced = persist_record(paths, existing_record, rename_file=False)
+            if capture_enrich or enrich == 1:
+                metadata = fetch_url_metadata(bookmark.url)
+                if metadata.ok:
+                    apply_enrichment_to_bookmark(synced.bookmark, metadata, overwrite_title=False)
+                    persist_record(paths, synced, rename_file=False)
+            return RedirectResponse(url=f"/bookmark/{bookmark.id}", status_code=303)
+
+        bookmark = Bookmark(
+            id=generate_short_id(),
+            title=title.strip() or url.strip(),
+            url=url.strip(),
+            tags=parsed_tags,
+            saved_at=utc_now_iso(),
+            source="capture",
+            folder_path=normalize_folder_path(folder),
+            chrome_guid=None,
+            notes=note_text,
+            archived=False,
+            description="",
+            fetched_at=None,
+            source_meta="",
+            canonical_url=None,
+            body=note_text,
+            visibility=app_config.default_visibility,
+        )
+        created_path = write_bookmark(paths, bookmark)
+        rel_path = relative_to_root(paths, created_path)
+        created_record = persist_record(
+            paths,
+            BookmarkRecord(
+                bookmark=bookmark,
+                path=created_path,
+                rel_path=rel_path,
+                entry=IndexEntry(id=bookmark.id, title=bookmark.title, url=bookmark.url, tags=bookmark.tags, path=rel_path, saved_at=bookmark.saved_at),
+            ),
+            rename_file=False,
+        )
+        if capture_enrich or enrich == 1:
+            metadata = fetch_url_metadata(bookmark.url)
+            if metadata.ok:
+                apply_enrichment_to_bookmark(created_record.bookmark, metadata, overwrite_title=False)
+                persist_record(paths, created_record, rename_file=False)
+        return RedirectResponse(url=f"/bookmark/{bookmark.id}", status_code=303)
 
     @app.get("/", response_class=HTMLResponse)
     def home(
@@ -251,8 +354,10 @@ def create_app(
             raise HTTPException(status_code=404, detail="Bookmark not found")
         bookmark_path = (paths.root / match.path).resolve()
         bookmark = read_bookmark_file(bookmark_path)
-        body_html = markdown.markdown(bookmark.body or "", extensions=["extra"])
+        raw_html = markdown.markdown(bookmark.body or "", extensions=["extra"])
+        body_html = Markup(sanitize_html(raw_html))
         frontmatter_text = json.dumps(bookmark.to_frontmatter(), indent=2)
+        safe_bookmark_url = sanitize_link_url(bookmark.url)
         return templates.TemplateResponse(
             name="detail.html",
             request=request,
@@ -261,6 +366,7 @@ def create_app(
                 "body_html": body_html,
                 "frontmatter_text": frontmatter_text,
                 "source_path": match.path,
+                "safe_bookmark_url": safe_bookmark_url,
                 "enable_write": enable_write,
                 "enable_capture": enable_capture,
             },
@@ -315,7 +421,7 @@ def create_app(
         return RedirectResponse(url=f"/bookmark/{bookmark_id}", status_code=303)
 
     @app.get("/capture")
-    def capture(
+    def capture_get(
         url: str = Query(..., min_length=1),
         title: str = "",
         tags: str = "",
@@ -323,75 +429,19 @@ def create_app(
         folder: str = "",
         enrich: int = Query(0),
     ) -> RedirectResponse:
-        _write_guard(enable_write, enable_capture, is_capture=True)
-        records = find_records_by_url(paths, url, include_archived=True)
-        existing_record = records[0] if records else None
+        logger.warning("capture_get_deprecated: query params can leak via browser history/proxy logs; prefer POST /capture")
+        return _capture_bookmark(url=url, title=title, tags=tags, notes=notes, folder=folder, enrich=enrich)
 
-        parsed_tags = split_tags(tags)
-        note_text = notes.strip()
-
-        if existing_record is not None:
-            bookmark = existing_record.bookmark
-            if title.strip():
-                bookmark.title = title.strip()
-            if folder.strip():
-                bookmark.folder_path = normalize_folder_path(folder)
-            if parsed_tags:
-                bookmark.tags = _merge_tags(bookmark.tags, parsed_tags)
-            if note_text:
-                if bookmark.body:
-                    if note_text not in bookmark.body:
-                        bookmark.body = f"{bookmark.body}\n\n{note_text}"
-                else:
-                    bookmark.body = note_text
-                if not bookmark.notes:
-                    bookmark.notes = note_text
-            bookmark.source = "capture"
-            bookmark.url = url.strip()
-            synced = persist_record(paths, existing_record, rename_file=False)
-            if capture_enrich or enrich == 1:
-                metadata = fetch_url_metadata(bookmark.url)
-                if metadata.ok:
-                    apply_enrichment_to_bookmark(synced.bookmark, metadata, overwrite_title=False)
-                    persist_record(paths, synced, rename_file=False)
-            return RedirectResponse(url=f"/bookmark/{bookmark.id}", status_code=303)
-
-        bookmark = Bookmark(
-            id=generate_short_id(),
-            title=title.strip() or url.strip(),
-            url=url.strip(),
-            tags=parsed_tags,
-            saved_at=utc_now_iso(),
-            source="capture",
-            folder_path=normalize_folder_path(folder),
-            chrome_guid=None,
-            notes=note_text,
-            archived=False,
-            description="",
-            fetched_at=None,
-            source_meta="",
-            canonical_url=None,
-            body=note_text,
-            visibility=app_config.default_visibility,
-        )
-        created_path = write_bookmark(paths, bookmark)
-        rel_path = relative_to_root(paths, created_path)
-        created_record = persist_record(
-            paths,
-            BookmarkRecord(
-                bookmark=bookmark,
-                path=created_path,
-                rel_path=rel_path,
-                entry=IndexEntry(id=bookmark.id, title=bookmark.title, url=bookmark.url, tags=bookmark.tags, path=rel_path, saved_at=bookmark.saved_at),
-            ),
-            rename_file=False,
-        )
-        if capture_enrich or enrich == 1:
-            metadata = fetch_url_metadata(bookmark.url)
-            if metadata.ok:
-                apply_enrichment_to_bookmark(created_record.bookmark, metadata, overwrite_title=False)
-                persist_record(paths, created_record, rename_file=False)
-        return RedirectResponse(url=f"/bookmark/{bookmark.id}", status_code=303)
+    @app.post("/capture")
+    def capture_post(
+        url: str = Form(..., min_length=1),
+        title: str = Form(""),
+        tags: str = Form(""),
+        notes: str = Form(""),
+        folder: str = Form(""),
+        enrich: int = Form(0),
+    ) -> RedirectResponse:
+        return _capture_bookmark(url=url, title=title, tags=tags, notes=notes, folder=folder, enrich=enrich)
 
     @app.get("/api/config")
     def config() -> JSONResponse:

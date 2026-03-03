@@ -7,7 +7,11 @@
   source={{ bookmark.source }} |
   file={{ source_path }}
 </p>
-<p><a class="btn" href="{{ bookmark.url }}" target="_blank" rel="noopener">Open URL</a></p>
+{% if safe_bookmark_url %}
+<p><a class="btn" href="{{ safe_bookmark_url }}" target="_blank" rel="noopener">Open URL</a></p>
+{% else %}
+<p class="muted">Open URL disabled (unsafe scheme): {{ bookmark.url }}</p>
+{% endif %}
 {% if bookmark.description %}
 <p class="muted">{{ bookmark.description }}</p>
 {% endif %}
@@ -53,7 +57,7 @@
 <section class="card">
   <h2>Notes</h2>
   {% if body_html %}
-  <div>{{ body_html|safe }}</div>
+  <div>{{ body_html }}</div>
   {% else %}
   <p class="muted">No markdown body.</p>
   {% endif %}

@@ -77,3 +77,27 @@ def test_capture_endpoint_forbidden_when_write_and_capture_disabled(tmp_path: Pa
     client = TestClient(app)
     response = client.get("/capture", params={"url": "https://example.com"}, follow_redirects=False)
     assert response.status_code == 403
+
+
+def test_capture_endpoint_supports_post(tmp_path: Path) -> None:
+    app = create_app(repo_dir=tmp_path, enable_capture=True)
+    client = TestClient(app)
+
+    response = client.post(
+        "/capture",
+        data={
+            "url": "https://example.com/post",
+            "title": "Captured Via Post",
+            "tags": "capture,post",
+            "notes": "post path",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/bookmark/")
+
+    paths = init_storage(tmp_path)
+    entries = load_index(paths)
+    assert len(entries) == 1
+    assert entries[0].title == "Captured Via Post"
