@@ -21,17 +21,40 @@
     <main>
       <div class="container stack">
         <section class="hero">
-          <h1>Link Garden &mdash; bookmarks that grow into a place.</h1>
-          <p class="lead">
-            Link Garden is a local-first bookmark library that stores your links as simple files you can keep, move, and host
-            anywhere - without being trapped inside a browser or a platform.
-          </p>
-          <a class="button-link" href="docs/quickstart/">Docs -&gt; Quickstart</a>
+          <div class="hero-layout">
+            <div class="hero-copy">
+              <p class="hero-kicker">Local-first archive / static export / calm web</p>
+              <h1>Link Garden &mdash; bookmarks that grow into a place.</h1>
+              <p class="lead">
+                Link Garden is a local-first bookmark library that stores your links as simple files you can keep, move, and
+                host anywhere, without being trapped inside a browser or a platform.
+              </p>
+              <div class="hero-actions">
+                <a class="button-link" href="docs/quickstart/">Enter Quickstart</a>
+                <a class="ghost-link" href="about/philosophy/">Read Philosophy</a>
+              </div>
+            </div>
+            <aside class="hero-aside" aria-label="Project signal">
+              <p class="hero-aside-label">Signal Snapshot</p>
+              <ul class="status-list">
+                <li><strong>Storage</strong> Markdown files with YAML frontmatter.</li>
+                <li><strong>Mode</strong> Private by default, local-first from the start.</li>
+                <li><strong>Publish</strong> Static export when you choose to share.</li>
+              </ul>
+            </aside>
+          </div>
+        </section>
+
+        <section class="signal-strip" aria-label="Project qualities">
+          <span>No feed</span>
+          <span>Plain files</span>
+          <span>Quiet by default</span>
+          <span>Static exports</span>
         </section>
 
         <section class="grid two">
           <article class="panel">
-            <h2>What it is</h2>
+            <h2>What grows here</h2>
             <ul>
               <li>A local-first CLI that stores bookmarks as Markdown with YAML frontmatter.</li>
               <li>A searchable library with index-based listing, filtering, and dedupe tooling.</li>
@@ -39,7 +62,7 @@
             </ul>
           </article>
           <article class="panel">
-            <h2>What it is not</h2>
+            <h2>What it avoids</h2>
             <ul>
               <li>Not a social feed or engagement platform.</li>
               <li>Not a hosted account you must keep paying to access your own data.</li>
@@ -49,10 +72,15 @@
         </section>
 
         <section class="panel">
-          <h2>Start small</h2>
+          <h2>First transmission</h2>
+          <pre><code>mkdir my-garden
+cd my-garden
+link-garden init .
+link-garden add --url "https://example.com" --title "Example"
+link-garden export --format html --out ./exports --scope public</code></pre>
           <p>
-            Initialize a garden, add one bookmark, and run a public-scope export. The quickstart is short and uses only the
-            existing CLI commands in this repository.
+            Initialize a garden, add one bookmark, and export only what you mean to publish. The quickstart stays short and
+            uses the existing CLI commands in this repository.
           </p>
           <p><a href="docs/quickstart/">Go to Quickstart</a></p>
         </section>
